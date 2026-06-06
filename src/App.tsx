@@ -6,6 +6,7 @@ import AdminPage from './pages/admin/AdminPage';
 import RepartidorPage from './pages/repartidor/RepartidorPage';
 import AdminLayout from './layouts/AdminLayout';
 import RepartidorLayout from './layouts/RepartidorLayout';
+import UsuarioLayout from './layouts/UsuarioLayout';
 
 const App: React.FC = () => {
   return (
@@ -15,7 +16,10 @@ const App: React.FC = () => {
         <Route path="/" element={<Home />} />
 
         {/* User Type Routes */}
-        <Route path="/usuario" element={<UsuarioPage />} />
+       <Route path="/usuario" element={<UsuarioLayout />}>
+          <Route index element={<UsuarioPage />} />
+          <Route path="pedido" element={<h2>Sub-page: Current Client Orders</h2>} />
+        </Route>
         <Route path="/admin" element={<AdminLayout />}>
           <Route index element={<AdminPage />} />
           <Route path="users" element={<h2>Sub-page: Access Management</h2>} />
