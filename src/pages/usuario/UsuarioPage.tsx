@@ -1,7 +1,6 @@
 import React from 'react';
 
-const UsuarioPage: React.FC = () => {
+export default function UsuarioPage() {
   return <h2>Client Dashboard (Usuario)</h2>;
 };
 
-export default UsuarioPage;

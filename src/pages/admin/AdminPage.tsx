@@ -1,7 +1,6 @@
 import React from 'react';
 
-const AdminPage: React.FC = () => {
+export default function AdminPage() {
   return <h2>Admin Control Panel (Admin)</h2>;
 };
 
-export default AdminPage;
