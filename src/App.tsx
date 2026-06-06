@@ -5,6 +5,7 @@ import UsuarioPage from './pages/usuario/UsuarioPage';
 import AdminPage from './pages/admin/AdminPage';
 import RepartidorPage from './pages/repartidor/RepartidorPage';
 import AdminLayout from './layouts/AdminLayout';
+import RepartidorLayout from './layouts/RepartidorLayout';
 
 const App: React.FC = () => {
   return (
@@ -21,7 +22,11 @@ const App: React.FC = () => {
           <Route path="alerts" element={<h2>Sub-page: Active Stock Substitution Log</h2>} />
           <Route path="settings" element={<h2>Sub-page: Control Rules</h2>} />
         </Route>
-        <Route path="/repartidor" element={<RepartidorPage />} />
+        <Route path="/repartidor" element={<RepartidorLayout />}>
+          <Route index element={<RepartidorPage />} />
+          <Route path="mapa" element={<h2>Sub-page: Live Route Navigation Map</h2>} />
+          <Route path="history" element={<h2>Sub-page: Past Deliveries Resolved</h2>} />
+        </Route>
       </Routes>
     </Router>
   );

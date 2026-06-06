@@ -1,17 +1,17 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router';
-import { LayoutDashboard, Users, PackageOpen, Presentation, ChartSpline } from 'lucide-react';
+import { LayoutDashboard, Users, PackageOpen, Truck, Shield, User } from 'lucide-react';
 import { motion } from 'framer-motion';
 
-const AdminSidebar: React.FC = () => {
+const RepartidorSidebar: React.FC = () => {
   const location = useLocation();
   
   const menuItems = [
-    { name: 'Resumen', path: '/admin', icon: <LayoutDashboard size={18} /> },
-    { name: 'Pedidos', path: '/admin/pedidos', icon: <PackageOpen size={18} /> },
-    { name: 'Predicciones', path: '/admin/predicciones', icon: <Presentation size={18} /> },
-    { name: 'Analítica', path: '/admin/analiticas', icon: <ChartSpline size={18} /> },
-    { name: 'Usuarios', path: '/admin/usuarios', icon: <Users size={18} /> },
+    { name: 'Inicio', path: '/repartidor', icon: <LayoutDashboard size={18} /> },
+    { name: 'Pedidos', path: '/repartidor/pedidos', icon: <PackageOpen size={18} /> },
+    { name: 'Ruta', path: '/repartidor/ruta', icon: <Truck size={18} /> },
+    { name: 'Incidencias', path: '/repartidor/incidencias', icon: <Shield size={18} /> },
+    { name: 'Perfil', path: '/repartidor/perfil', icon: <User size={18} /> },
   ];
 
   return (
@@ -161,4 +161,4 @@ const AdminSidebar: React.FC = () => {
     </motion.aside>  );
 };
 
-export default AdminSidebar;
+export default RepartidorSidebar;
