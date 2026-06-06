@@ -9,10 +9,13 @@ import RepartidorPage from './pages/repartidor/RepartidorPage';
 import AdminLayout from './layouts/AdminLayout';
 import RepartidorLayout from './layouts/RepartidorLayout';
 import UsuarioLayout from './layouts/UsuarioLayout';
+import PedidosPage from './pages/usuario/PedidosPage';
+import CheckoutPage from './pages/usuario/CheckoutPage';
+import MisPedidosPage from './pages/usuario/MisPedidos';
 
 const App: React.FC = () => {
   return (
-    <AuthProvider>          {/* ← envuelve TODO, incluyendo el Router */}
+    <AuthProvider>
       <Router>
         <Routes>
           {/* Público */}
@@ -22,7 +25,9 @@ const App: React.FC = () => {
           <Route element={<ProtectedRoute allowedRole="usuario" />}>
             <Route path="/usuario" element={<UsuarioLayout />}>
               <Route index element={<UsuarioPage />} />
-              <Route path="pedido" element={<h2>Pedidos</h2>} />
+              <Route path="tienda" element={<PedidosPage />} />
+              <Route path="tienda/checkout" element={<CheckoutPage />} />
+              <Route path="pedidos" element={<MisPedidosPage />} />
             </Route>
           </Route>
 
@@ -30,9 +35,9 @@ const App: React.FC = () => {
           <Route element={<ProtectedRoute allowedRole="admin" />}>
             <Route path="/admin" element={<AdminLayout />}>
               <Route index element={<AdminPage />} />
-              <Route path="users"    element={<h2>Usuarios</h2>} />
-              <Route path="alerts"   element={<h2>Alertas</h2>} />
-              <Route path="settings" element={<h2>Configuración</h2>} />
+              <Route path="users"    element={<h2>Sub-page: Access Management</h2>} />
+              <Route path="alerts"   element={<h2>Sub-page: Active Stock Substitution Log</h2>} />
+              <Route path="settings" element={<h2>Sub-page: Control Rules</h2>} />
             </Route>
           </Route>
 
@@ -40,8 +45,8 @@ const App: React.FC = () => {
           <Route element={<ProtectedRoute allowedRole="repartidor" />}>
             <Route path="/repartidor" element={<RepartidorLayout />}>
               <Route index element={<RepartidorPage />} />
-              <Route path="mapa"    element={<h2>Mapa</h2>} />
-              <Route path="history" element={<h2>Historial</h2>} />
+              <Route path="mapa"    element={<h2>Sub-page: Live Route Navigation Map</h2>} />
+              <Route path="history" element={<h2>Sub-page: Past Deliveries Resolved</h2>} />
             </Route>
           </Route>
 

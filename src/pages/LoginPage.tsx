@@ -56,14 +56,12 @@ export default function LoginPage() {
   try {
     await login(email.trim().toLowerCase(), password);
 
-    // login() ya guardó en localStorage — leemos directo de ahí
     const raw = localStorage.getItem('or_user');
     if (!raw) throw new Error('No se pudo guardar la sesión');
-    
+
     const u = JSON.parse(raw) as { rol: UserRole };
     const from = (location.state as { from?: { pathname: string } })?.from?.pathname;
-    
-    // Validar que el rol sea válido antes de navegar
+
     const validRoles = ['usuario', 'admin', 'repartidor'];
     if (!validRoles.includes(u.rol)) throw new Error('Rol no reconocido');
 
