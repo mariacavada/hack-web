@@ -1,6 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router';
-import Home from './pages/Home';
+import { BrowserRouter as Router, Routes, Route } from 'react-router'; // matching your exact import
 import UsuarioPage from './pages/usuario/UsuarioPage';
 import AdminPage from './pages/admin/AdminPage';
 import RepartidorPage from './pages/repartidor/RepartidorPage';
@@ -8,6 +7,9 @@ import AdminLayout from './layouts/AdminLayout';
 import RepartidorLayout from './layouts/RepartidorLayout';
 import UsuarioLayout from './layouts/UsuarioLayout';
 import LoginPage from './pages/LoginPage';
+import PedidosPage from './pages/usuario/PedidosPage';
+import CheckoutPage from './pages/usuario/CheckoutPage';
+import MisPedidosPage from './pages/usuario/MisPedidos';
 const App: React.FC = () => {
   return (
     <Router>
@@ -16,16 +18,21 @@ const App: React.FC = () => {
         <Route path="/" element={<LoginPage />} />
 
         {/* User Type Routes */}
-       <Route path="/usuario" element={<UsuarioLayout />}>
+        <Route path="/usuario" element={<UsuarioLayout />}>
           <Route index element={<UsuarioPage />} />
-          <Route path="pedido" element={<h2>Sub-page: Current Client Orders</h2>} />
+          <Route path="tienda" element={<PedidosPage />} />
+          <Route path="tienda/checkout" element={<CheckoutPage />} />
+          <Route path="pedidos" element={<MisPedidosPage />} />
+
         </Route>
+
         <Route path="/admin" element={<AdminLayout />}>
           <Route index element={<AdminPage />} />
           <Route path="users" element={<h2>Sub-page: Access Management</h2>} />
           <Route path="alerts" element={<h2>Sub-page: Active Stock Substitution Log</h2>} />
           <Route path="settings" element={<h2>Sub-page: Control Rules</h2>} />
         </Route>
+
         <Route path="/repartidor" element={<RepartidorLayout />}>
           <Route index element={<RepartidorPage />} />
           <Route path="mapa" element={<h2>Sub-page: Live Route Navigation Map</h2>} />
