@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from "react-router";
+import { useAuth } from "../../auth/AuthContext";
 
 // --- TYPES & INTERFACES ---
 interface OrderItem {
@@ -46,7 +47,9 @@ interface TopProduct {
 
 // --- MAIN COMPONENT ---
 export default function MisPedidosPage() {
-const navigate = useNavigate();
+  const navigate = useNavigate();
+  const { user } = useAuth(); // 2. Consumimos el usuario y su JWT directamente del contexto
+
   // State variables
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -62,16 +65,20 @@ const navigate = useNavigate();
   // --- API FETCHING ---
   useEffect(() => {
     async function fetchOrders() {
+      // 3. Si no hay sesión o token listo, detenemos la petición de forma segura
+      if (!user || !user.token) {
+        setError("No hay una sesión activa de usuario. Por favor inicia sesión.");
+        setIsLoading(false);
+        return;
+      }
+
       setIsLoading(true);
       setError(null);
       try {
-        // Replace with your real token strategy (e.g., localStorage, Context, cookie)
-        const token = localStorage.getItem('token_usuario') || ''; 
-        
         const response = await fetch('https://hack-back.up.railway.app/api/orders/my', {
           method: 'GET',
           headers: {
-            'Authorization': `Bearer ${token}`,
+            'Authorization': `Bearer ${user.token}`, // 4. Inyección del token JWT verificado y corregido
             'Content-Type': 'application/json'
           }
         });
@@ -81,8 +88,8 @@ const navigate = useNavigate();
         }
 
         const data = await response.json();
-        
-        // Mock fallback data structures if live API is missing granular tracking/items schemas
+        console.log(data)
+        // Normalización de estructuras de datos
         const normalizedData = (data || []).map((order: any, idx: number) => ({
           id_pedido: order.id_pedido || `ORD-${10234 + idx}`,
           fecha_pedido: order.fecha_pedido || new Date(Date.now() - idx * 24 * 60 * 60 * 1000).toISOString(),
@@ -112,7 +119,7 @@ const navigate = useNavigate();
     }
 
     fetchOrders();
-  }, []);
+  }, [user]); // Añadido user como dependencia para re-ejecutar si la sesión cambia
 
   // --- STATS & INSIGHTS ANALYTICS CALCULATIONS ---
   const summaryMetrics = useMemo<SummaryData>(() => {
@@ -123,7 +130,6 @@ const navigate = useNavigate();
     const totalPedidos = orders.length;
     const totalGastado = orders.reduce((sum, order) => sum + order.total, 0);
 
-    // Get most recent order date description
     const recentOrder = orders[0];
     let pedidoRecienteText = 'Hoy';
     if (recentOrder?.fecha_pedido) {
@@ -132,7 +138,6 @@ const navigate = useNavigate();
       pedidoRecienteText = diffDays === 0 ? 'Hoy' : diffDays === 1 ? 'Ayer' : `Hace ${diffDays} días`;
     }
 
-    // Product frequency aggregation
     const productCounts: { [key: string]: number } = {};
     orders.forEach(o => {
       o.items.forEach(item => {
@@ -152,12 +157,11 @@ const navigate = useNavigate();
     return { totalPedidos, totalGastado, pedidoRecienteText, productoMasComprado };
   }, [orders]);
 
-  // Aggregate Top 5 products for horizontal progress charts
   const topProductsList = useMemo<TopProduct[]>(() => {
     const productCounts: { [key: string]: number } = {};
     orders.forEach(o => {
       o.items.forEach(item => {
-        productCounts[item.nombre] = (productCounts[item.nombre] || 0) + 1; // Count per order instance
+        productCounts[item.nombre] = (productCounts[item.nombre] || 0) + 1;
       });
     });
     return Object.entries(productCounts)
@@ -166,7 +170,6 @@ const navigate = useNavigate();
       .slice(0, 5);
   }, [orders]);
 
-  // SVG Line Chart Coordinate Generator
   const spendingHistoryCoordinates = useMemo(() => {
     if (orders.length === 0) return '';
     const sorted = [...orders].sort((a, b) => new Date(a.fecha_pedido).getTime() - new Date(b.fecha_pedido).getTime());
@@ -189,21 +192,17 @@ const navigate = useNavigate();
   // --- FILTERS LOGIC ---
   const filteredOrders = useMemo(() => {
     return orders.filter(order => {
-      // 1. Text Search Match
       const matchesSearch = 
         order.id_pedido.toLowerCase().includes(searchQuery.toLowerCase()) ||
         order.items.some(i => i.nombre.toLowerCase().includes(searchQuery.toLowerCase()));
 
-      // 2. Status Match
       const matchesStatus = statusFilter === 'todos' || order.status_final.toLowerCase() === statusFilter.toLowerCase();
 
-      // 3. Amount Metric Match
       let matchesAmount = true;
       if (amountFilter === 'under500') matchesAmount = order.total < 500;
       else if (amountFilter === '500-1000') matchesAmount = order.total >= 500 && order.total <= 1000;
       else if (amountFilter === 'over1000') matchesAmount = order.total > 1000;
 
-      // 4. Date Filter Range Match
       let matchesDate = true;
       if (dateFilter !== 'todo') {
         const orderTime = new Date(order.fecha_pedido).getTime();
@@ -216,7 +215,6 @@ const navigate = useNavigate();
     });
   }, [orders, searchQuery, dateFilter, statusFilter, amountFilter]);
 
-  // Status Badge styling definitions
   const getStatusStyle = (status: Order['status_final']) => {
     const normalize = status.toLowerCase();
     if (normalize === 'pendiente') return 'bg-yellow-50 text-yellow-700 border-yellow-200';
@@ -224,7 +222,7 @@ const navigate = useNavigate();
     if (normalize === 'en preparación') return 'bg-indigo-50 text-indigo-700 border-indigo-200';
     if (normalize === 'en camino') return 'bg-orange-50 text-orange-700 border-orange-200';
     if (normalize === 'entregado') return 'bg-green-50 text-green-700 border-green-200';
-    return 'bg-red-50 text-red-700 border-red-200'; // Cancelado
+    return 'bg-red-50 text-red-700 border-red-200';
   };
 
   return (
@@ -245,7 +243,7 @@ const navigate = useNavigate();
           </div>
         )}
 
-        {/* LOADING STATE (Production Skeleton Grid) */}
+        {/* LOADING STATE */}
         {isLoading ? (
           <div className="space-y-6">
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -286,10 +284,9 @@ const navigate = useNavigate();
               </div>
             </section>
 
-            {/* ANALYTICS SECTION (Horizontal Bars & Native SVG Spend Chart) */}
+            {/* ANALYTICS SECTION */}
             {orders.length > 0 && (
               <section className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-                {/* Horizontal Progress Bars */}
                 <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
                   <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Productos más comprados</h3>
                   <div className="space-y-2.5">
@@ -311,7 +308,6 @@ const navigate = useNavigate();
                   </div>
                 </div>
 
-                {/* SVG Mini Line Chart */}
                 <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm flex flex-col justify-between">
                   <div>
                     <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Historial de gasto temporal</h3>
@@ -327,7 +323,6 @@ const navigate = useNavigate();
                         strokeLinejoin="round"
                         points={spendingHistoryCoordinates}
                       />
-                      {/* Interactive dot markers for data points */}
                       {spendingHistoryCoordinates.split(' ').map((coord, i) => {
                         const [x, y] = coord.split(',');
                         if (!x || !y) return null;
@@ -350,7 +345,6 @@ const navigate = useNavigate();
             {/* FILTER TOOLBAR */}
             <section className="bg-white border border-gray-200 rounded-lg p-4 mb-6 shadow-sm">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                {/* Search field */}
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">Buscar pedido</label>
                   <input
@@ -362,7 +356,6 @@ const navigate = useNavigate();
                   />
                 </div>
 
-                {/* Date range filter */}
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">Periodo de tiempo</label>
                   <select
@@ -377,7 +370,6 @@ const navigate = useNavigate();
                   </select>
                 </div>
 
-                {/* Status Filter */}
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">Estado del envío</label>
                   <select
@@ -395,7 +387,6 @@ const navigate = useNavigate();
                   </select>
                 </div>
 
-                {/* Amount Tier Filter */}
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">Monto de la compra</label>
                   <select
@@ -412,11 +403,10 @@ const navigate = useNavigate();
               </div>
             </section>
 
-            {/* ORDERS ITEMS CARDS LIST CONTAINER */}
+            {/* ORDERS CARDS LIST */}
             <section className="space-y-4">
               <AnimatePresence mode="popLayout">
                 {filteredOrders.length === 0 ? (
-                  // EMPTY STATE SUB-COMPONENT
                   <motion.div
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -429,7 +419,7 @@ const navigate = useNavigate();
                     <h3 className="mt-2 text-sm font-semibold text-gray-900">Todavía no has realizado pedidos</h3>
                     <p className="mt-1 text-xs text-gray-500">¿Buscas algo refrescante? Explora nuestro catálogo actual.</p>
                     <div className="mt-6">
-                      <button onClick={() => navigate("/usuario/tienda")} className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md Skinner text-white bg-red-600 hover:bg-red-700 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500">
+                      <button onClick={() => navigate("/usuario/tienda")} className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 transition-colors focus:outline-none">
                         Explorar productos
                       </button>
                     </div>
@@ -445,7 +435,6 @@ const navigate = useNavigate();
                       transition={{ duration: 0.15 }}
                       className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden hover:border-gray-300 transition-all"
                     >
-                      {/* Card Header Structure */}
                       <div className="bg-gray-50 px-4 py-3 border-b border-gray-200 flex flex-wrap items-center justify-between gap-3 text-xs sm:text-sm">
                         <div className="flex items-center space-x-6">
                           <div>
@@ -466,15 +455,12 @@ const navigate = useNavigate();
                           </div>
                         </div>
 
-                        {/* Order Status Badge */}
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${getStatusStyle(order.status_final)}`}>
                           {order.status_final}
                         </span>
                       </div>
 
-                      {/* Card Body Core Info */}
                       <div className="p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                        {/* Compact Products Aggregator Matrix */}
                         <div className="space-y-1 w-full sm:max-w-xl">
                           {order.items.slice(0, 3).map((item, i) => (
                             <div key={i} className="text-sm text-gray-700 flex items-center justify-between">
@@ -489,7 +475,6 @@ const navigate = useNavigate();
                           )}
                         </div>
 
-                        {/* Interactive Dynamic CTAs Buttons Panel */}
                         <div className="flex sm:flex-col lg:flex-row gap-2 w-full sm:w-auto shrink-0 justify-end">
                           <button
                             onClick={() => setSelectedOrder(order)}
@@ -519,11 +504,10 @@ const navigate = useNavigate();
           </>
         )}
 
-        {/* SIDE DRAWER SIDE-PANEL FOR COMPREHENSIVE ORDER HISTORY SPECIFICS */}
+        {/* SIDE DRAWER FOR ORDER SPECIFICS */}
         <AnimatePresence>
           {selectedOrder && (
             <>
-              {/* Dark backdrop overlay layout shroud */}
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 0.4 }}
@@ -532,7 +516,6 @@ const navigate = useNavigate();
                 className="fixed inset-0 bg-black z-40"
               />
 
-              {/* Right Side Drawer Content Panel */}
               <motion.div
                 initial={{ x: '100%' }}
                 animate={{ x: 0 }}
@@ -540,7 +523,6 @@ const navigate = useNavigate();
                 transition={{ type: 'tween', duration: 0.25 }}
                 className="fixed top-0 right-0 h-full w-full sm:max-w-md bg-white shadow-xl z-50 overflow-y-auto flex flex-col border-l border-gray-200"
               >
-                {/* Drawer Header Layout */}
                 <div className="p-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
                   <div>
                     <h2 className="text-base font-bold text-gray-900">Detalle del pedido</h2>
@@ -556,9 +538,7 @@ const navigate = useNavigate();
                   </button>
                 </div>
 
-                {/* Drawer Main Body */}
                 <div className="p-4 space-y-6 flex-1">
-                  {/* Status Grid Overview Banner Summary */}
                   <div className="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-md text-xs sm:text-sm">
                     <span className="text-gray-500 font-medium">Estado actual</span>
                     <span className={`px-2.5 py-0.5 rounded-full font-semibold border ${getStatusStyle(selectedOrder.status_final)}`}>
@@ -566,7 +546,6 @@ const navigate = useNavigate();
                     </span>
                   </div>
 
-                  {/* Complete List of Products Line Items Grid */}
                   <div>
                     <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Artículos</h3>
                     <div className="divide-y divide-gray-100 border border-gray-200 rounded-md overflow-hidden">
@@ -585,7 +564,6 @@ const navigate = useNavigate();
                     </div>
                   </div>
 
-                  {/* Financial Receipt Invoicing breakdown block */}
                   <div className="bg-gray-50 p-3 rounded-md border border-gray-200 space-y-1.5 text-xs sm:text-sm">
                     <div className="flex justify-between text-gray-500">
                       <span>Subtotal</span>
@@ -601,7 +579,6 @@ const navigate = useNavigate();
                     </div>
                   </div>
 
-                  {/* Logistics Fulfillment Details Block */}
                   <div className="space-y-2">
                     <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Información de Entrega</h3>
                     <div className="bg-white border border-gray-200 rounded-md p-3 text-xs sm:text-sm space-y-2">
@@ -624,42 +601,23 @@ const navigate = useNavigate();
                     </div>
                   </div>
 
-                  {/* Tracking Log Timeline Stepper Updates */}
                   <div>
-                    <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Historial de Ruta</h3>
-                    <div className="relative border-l-2 border-gray-200 ml-2 pl-4 space-y-4 text-xs sm:text-sm">
-                      {selectedOrder.tracking.map((track, idx) => (
-                        <div key={idx} className="relative">
-                          {/* Active state pulsing node icon indicator indicator */}
-                          <span className={`absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full border-2 bg-white ${
-                            idx === selectedOrder.tracking.length - 1 ? 'border-red-600 scale-125' : 'border-gray-400'
+                    <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Historial de Tracking</h3>
+                    <div className="relative border-l-2 border-gray-100 ml-2 pl-4 space-y-4">
+                      {selectedOrder.tracking.map((track, i) => (
+                        <div key={i} className="relative text-xs sm:text-sm">
+                          <div className={`absolute -left-[21px] top-1.5 w-2 h-2 rounded-full border-2 bg-white ${
+                            i === selectedOrder.tracking.length - 1 ? 'border-red-600 scale-125' : 'border-gray-300'
                           }`} />
-                          <div className="flex items-baseline justify-between">
-                            <p className={`font-semibold ${idx === selectedOrder.tracking.length - 1 ? 'text-red-600' : 'text-gray-700'}`}>
-                              {track.status}
-                            </p>
-                            <span className="text-[11px] text-gray-400 font-mono shrink-0 ml-2">{track.timestamp}</span>
+                          <div className="flex justify-between items-baseline">
+                            <span className="font-bold text-gray-800">{track.status}</span>
+                            <span className="text-[10px] font-mono text-gray-400">{track.timestamp}</span>
                           </div>
-                          <p className="text-xs text-gray-500 mt-0.5">{track.descripcion}</p>
+                          <p className="text-gray-500 text-xs mt-0.5 leading-relaxed">{track.descripcion}</p>
                         </div>
                       ))}
                     </div>
                   </div>
-                </div>
-
-                {/* Sticky Side Drawer Bottom Footer Panel Actions */}
-                <div className="p-4 border-t border-gray-200 bg-gray-50 flex gap-2">
-                  <button 
-                    onClick={() => setSelectedOrder(null)}
-                    className="flex-1 text-center py-2 border border-gray-300 rounded-md text-xs font-medium text-gray-700 bg-white hover:bg-gray-50 transition-all"
-                  >
-                    Cerrar panel
-                  </button>
-                  {selectedOrder.status_final === 'Entregado' && (
-                    <button className="flex-1 text-center py-2 border border-transparent rounded-md text-xs font-medium text-white bg-red-600 hover:bg-red-700 transition-all shadow-sm">
-                      Reordenar todo
-                    </button>
-                  )}
                 </div>
               </motion.div>
             </>

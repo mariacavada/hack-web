@@ -3,12 +3,17 @@ import { useNavigate } from "react-router";
 import { motion, AnimatePresence } from "framer-motion";
 import { mockProducts } from "./MockProducts";
 import { useCart } from "./CartContext";
+import { useAuth } from "../../auth/AuthContext";
+const API_BASE = import.meta.env.VITE_API_URL;
 
-const API_BASE = "https://hack-back.up.railway.app";
+interface ConfirmModalProps {
+  onClose: () => void;
+}
 
-function ConfirmModal({ onClose }: { onClose: () => void }) {
+function ConfirmModal({ onClose }: ConfirmModalProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+      {/* Backdrop */}
       <motion.div 
         initial={{ opacity: 0 }}
         animate={{ opacity: 0.5 }}
@@ -16,6 +21,8 @@ function ConfirmModal({ onClose }: { onClose: () => void }) {
         className="absolute inset-0 bg-black"
         onClick={onClose}
       />
+      
+      {/* Card */}
       <motion.div 
         initial={{ opacity: 0, scale: 0.95, y: 10 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -41,11 +48,13 @@ function ConfirmModal({ onClose }: { onClose: () => void }) {
 export default function CheckoutPage() {
   const navigate = useNavigate();
   const { cart, changeQty, clear } = useCart();
+  const { user } = useAuth(); // Consumo del estado global de autenticación
 
   const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Mapeo y filtrado de productos activos en el carrito
   const items = mockProducts.filter((p) => (cart[p.sku] ?? 0) > 0);
   const subtotal = items.reduce((sum, p) => sum + p.precio * (cart[p.sku] ?? 0), 0);
 
@@ -53,9 +62,9 @@ export default function CheckoutPage() {
     setLoading(true);
     setError(null);
 
-    const token = localStorage.getItem("token_usuario") || localStorage.getItem("token");
-    if (!token) {
-      setError("No hay una sesión activa de usuario. Por favor inicia sesión.");
+    // Validación reactiva usando tu propio AuthContext
+    if (!user || !user.token) {
+      setError("No hay una sesión activa de usuario. Por favor inicia sesión primero.");
       setLoading(false);
       return;
     }
@@ -71,7 +80,7 @@ export default function CheckoutPage() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${user.token}`, // Inyección limpia del token JWT verificado
         },
         body: JSON.stringify({
           cedis_id: "3012",
@@ -96,10 +105,11 @@ export default function CheckoutPage() {
 
   const handleCloseConfirm = () => {
     setShowConfirm(false);
-    clear();
-    navigate("/usuario/pedidos");
+    clear(); // Resetea el carrito global
+    navigate("/usuario/pedidos"); // Redirección al historial nativo superior
   };
 
+  // Estado vacío estructurado (Empty State)
   if (items.length === 0) {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center py-12 text-center px-4">
@@ -122,6 +132,7 @@ export default function CheckoutPage() {
     <div className="min-h-screen bg-gray-50 text-gray-900 antialiased px-4 md:px-8 py-6">
       <div className="max-w-5xl mx-auto">
         
+        {/* Botón de retorno técnico */}
         <button
           onClick={() => navigate("/usuario/tienda")}
           className="flex items-center gap-1.5 text-xs font-medium text-gray-400 hover:text-gray-700 transition-colors mb-4"
@@ -136,7 +147,7 @@ export default function CheckoutPage() {
 
         <div className="flex flex-col lg:flex-row gap-5 items-start">
 
-          {/* List Item Rows */}
+          {/* Columna Izquierda: Lista limpia de artículos */}
           <div className="flex-1 w-full bg-white rounded-lg border border-gray-200 shadow-sm divide-y divide-gray-100 overflow-hidden">
             {items.map((p) => {
               const qty = cart[p.sku] ?? 0;
@@ -148,7 +159,7 @@ export default function CheckoutPage() {
                     <p className="text-[11px] text-gray-400 mt-0.5">${p.precio.toFixed(2)} c/u</p>
                   </div>
                   
-                  {/* Dense Stepper Input */}
+                  {/* Control de cantidad compacto */}
                   <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded p-0.5 shrink-0">
                     <button
                       onClick={() => changeQty(p.sku, -1)}
@@ -173,7 +184,7 @@ export default function CheckoutPage() {
             })}
           </div>
 
-          {/* Checkout Right Side Panel summary matching current style */}
+          {/* Columna Derecha: Tarjeta de Resumen (Clean & Light Surface) */}
           <div className="w-full lg:w-80 shrink-0">
             <div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm sticky top-24 space-y-4">
               <h2 className="text-xs font-bold uppercase tracking-wider text-gray-400 border-b border-gray-100 pb-2">
@@ -237,9 +248,11 @@ export default function CheckoutPage() {
               </button>
             </div>
           </div>
+
         </div>
       </div>
 
+      {/* Modal controlado por Framer Motion */}
       <AnimatePresence>
         {showConfirm && <ConfirmModal onClose={handleCloseConfirm} />}
       </AnimatePresence>

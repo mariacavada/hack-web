@@ -52,7 +52,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   /* ── login ── */
   const login = useCallback(async (email: string, password: string) => {
-  const API = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
+  const API = import.meta.env.VITE_API_URL ?? "https://hack-back.up.railway.app" ;
 
   const res = await fetch(`${API}/api/auth/login`, {
     method:  'POST',
