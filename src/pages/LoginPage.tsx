@@ -3,8 +3,6 @@ import { useState } from "react";
 import { Link } from 'react-router';
 
 export default function LoginPage() {
-  const [remember, setRemember] = useState(false);
-
   return (
     <div className="min-h-screen bg-white flex items-center justify-center px-6">
       <motion.div
