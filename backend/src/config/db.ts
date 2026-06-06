@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 
-const MONGO_URI = process.env.MONGO_URI!;
+const MONGO_URI = (process.env.MONGODB_URI || process.env.MONGO_URI)!;
 const DB_NAME = process.env.DB_NAME || "order_rescue";
 
 export async function connectDB() {

@@ -1,39 +1,44 @@
 import { Schema, model, Document, Types } from "mongoose";
 
-export type NotificationType =
-  | "product_unavailable"
-  | "reorder_reminder"
-  | "substitution_suggestion"
-  | "order_status"
-  | "low_stock"
-  | "depletion_alert";
-
 export interface INotification extends Document {
-  user_id: Types.ObjectId;
-  type: NotificationType;
-  title: string;
-  body: string;
-  metadata: Record<string, unknown>;
-  read: boolean;
-  sent_at: Date;
-  channel: "push" | "sms" | "in_app" | "elevenlabs_call";
+  customer_id: Types.ObjectId;
+  id_pedido: string;
+  tipo: string;
+  titulo: string;
+  mensaje: string;
+  canales: Record<string, boolean>;
+  estado: string;
+  prioridad: string;
+  expiracion: Date | null;
+  created_at: Date;
 }
 
-const NotificationSchema = new Schema<INotification>({
-  user_id: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
-  type: {
-    type: String,
-    enum: ["product_unavailable", "reorder_reminder", "substitution_suggestion", "order_status", "low_stock", "depletion_alert"],
-    required: true,
+const NotificationSchema = new Schema<INotification>(
+  {
+    customer_id: { type: Schema.Types.ObjectId, ref: "Customer", required: true, index: true },
+    id_pedido: { type: String, index: true },
+    tipo: {
+      type: String,
+      enum: [
+        "product_unavailable",
+        "reorder_reminder",
+        "substitution_suggestion",
+        "order_status",
+        "low_stock",
+        "depletion_alert",
+      ],
+      required: true,
+    },
+    titulo: { type: String, required: true },
+    mensaje: { type: String, required: true },
+    canales: { type: Schema.Types.Mixed, default: { in_app: true } },
+    estado: { type: String, enum: ["pendiente", "enviada", "leida"], default: "pendiente" },
+    prioridad: { type: String, enum: ["baja", "media", "alta"], default: "media" },
+    expiracion: { type: Date, default: null },
   },
-  title: { type: String, required: true },
-  body: { type: String, required: true },
-  metadata: { type: Schema.Types.Mixed, default: {} },
-  read: { type: Boolean, default: false },
-  sent_at: { type: Date, default: Date.now },
-  channel: { type: String, enum: ["push", "sms", "in_app", "elevenlabs_call"], default: "in_app" },
-});
+  { timestamps: { createdAt: "created_at" } }
+);
 
-NotificationSchema.index({ user_id: 1, read: 1, sent_at: -1 });
+NotificationSchema.index({ customer_id: 1, estado: 1, created_at: -1 });
 
 export const Notification = model<INotification>("Notification", NotificationSchema);
