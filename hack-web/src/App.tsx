@@ -1,17 +1,26 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route } from 'react-router';
 
-function App() {
-  const [count, setCount] = useState(0)
+// Import the pages you just created
+import Home from './pages/Home';
+import UsuarioPage from './pages/usuario/UsuarioPage';
+import AdminPage from './pages/admin/AdminPage';
+import RepartidorPage from './pages/repartidor/RepartidorPage';
 
+const App: React.FC = () => {
   return (
-    <>
-      <div className="font-bold">Hola Sofi</div>
-    </>
-  )
-}
+    <Router>
+      <Routes>
+        {/* Main landing page */}
+        <Route path="/" element={<Home />} />
 
-export default App
+        {/* User Type Routes */}
+        <Route path="/usuario" element={<UsuarioPage />} />
+        <Route path="/admin" element={<AdminPage />} />
+        <Route path="/repartidor" element={<RepartidorPage />} />
+      </Routes>
+    </Router>
+  );
+};
+
+export default App;
