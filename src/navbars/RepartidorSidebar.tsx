@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router';
-import { LayoutDashboard, Users, PackageOpen, Truck, Shield, User } from 'lucide-react';
+import { LayoutDashboard, PackageOpen, Truck, Shield, User } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 const RepartidorSidebar: React.FC = () => {

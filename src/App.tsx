@@ -7,13 +7,13 @@ import RepartidorPage from './pages/repartidor/RepartidorPage';
 import AdminLayout from './layouts/AdminLayout';
 import RepartidorLayout from './layouts/RepartidorLayout';
 import UsuarioLayout from './layouts/UsuarioLayout';
-
+import LoginPage from './pages/LoginPage';
 const App: React.FC = () => {
   return (
     <Router>
       <Routes>
         {/* Main landing page */}
-        <Route path="/" element={<Home />} />
+        <Route path="/" element={<LoginPage />} />
 
         {/* User Type Routes */}
        <Route path="/usuario" element={<UsuarioLayout />}>
