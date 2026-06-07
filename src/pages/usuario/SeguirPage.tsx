@@ -326,7 +326,6 @@ export default function SeguirPage() {
                   {/* Grouped order detail — compact with see more */}
                   {(selected.items ?? []).length > 0 && (() => {
                     const grouped   = groupItems(selected.items)
-                    const hasPrice  = grouped.some(g => g.precio_unitario != null)
                     const LIMIT     = 3
                     const visible   = showAllItems ? grouped : grouped.slice(0, LIMIT)
                     const hiddenCnt = grouped.length - LIMIT
