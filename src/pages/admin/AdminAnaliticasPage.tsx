@@ -51,27 +51,33 @@ function sectionTitle(title: string, sub?: string) {
 
 /* ── Main component ──────────────────────────────────────────────────────── */
 export default function AdminAnaliticasPage() {
-  const [orders,   setOrders]   = useState<AnyOrder[]>([]);
-  const [risk,     setRisk]     = useState<RiskItem[]>([]);
-  const [lowStock, setLowStock] = useState<LowStockItem[]>([]);
-  const [loading,  setLoading]  = useState(true);
+  const [orders,    setOrders]    = useState<AnyOrder[]>([]);
+  const [risk,      setRisk]      = useState<RiskItem[]>([]);
+  const [lowStock,  setLowStock]  = useState<LowStockItem[]>([]);
+  const [skuNames,  setSkuNames]  = useState<Record<string, string>>({});
+  const [loading,   setLoading]   = useState(true);
 
   const token = localStorage.getItem('or_token') ?? '';
   const h = { Authorization: `Bearer ${token}` };
 
   useEffect(() => {
     Promise.all([
-      fetch(`${API}/api/admin/orders`,                                 { headers: h }).then(r => r.ok ? r.json() : []),
-      fetch(`${API}/api/admin/inventory/depletion-risk`, { headers: h }).then(r => r.ok ? r.json() : []),
-      fetch(`${API}/api/admin/inventory/low-stock`,     { headers: h }).then(r => r.ok ? r.json() : []),
+      fetch(`${API}/api/admin/orders`,                    { headers: h }).then(r => r.ok ? r.json() : []),
+      fetch(`${API}/api/admin/inventory/depletion-risk`,  { headers: h }).then(r => r.ok ? r.json() : []),
+      fetch(`${API}/api/admin/inventory/low-stock`,       { headers: h }).then(r => r.ok ? r.json() : []),
+      fetch(`${API}/api/ai/products`,                     { headers: h }).then(r => r.ok ? r.json() : []),
     ])
-      .then(async ([o, ri, ls]) => {
+      .then(async ([o, ri, ls, catalog]) => {
         const rawOrders: AnyOrder[] = Array.isArray(o) ? o : o?.orders ?? [];
         const riskArr = Array.isArray(ri) ? ri : ri?.items ?? ri?.predictions ?? [];
         const lsArr   = Array.isArray(ls) ? ls : ls?.items ?? [];
-        console.log('[depletion-risk]', ri, '→', riskArr);
-        console.log('[low-stock]',      ls, '→', lsArr);
-        if (riskArr[0]) console.log('[risk-item-0]', JSON.stringify(riskArr[0]));
+
+        // Build SKU → nombre map from product catalog
+        const catalogArr: any[] = Array.isArray(catalog) ? catalog : catalog?.products ?? [];
+        const nameMap: Record<string, string> = {};
+        catalogArr.forEach((p: any) => { if (p.sku) nameMap[String(p.sku)] = p.nombre ?? p.sku; });
+        setSkuNames(nameMap);
+
         setRisk(riskArr);
         setLowStock(lsArr);
 
@@ -153,10 +159,13 @@ export default function AdminAnaliticasPage() {
       .slice(-14);
   })();
 
+  const resolveName = (sku: string, nombre?: string) =>
+    (nombre ?? skuNames[String(sku)] ?? sku).slice(0, 22);
+
   // 4. Stock predictivo — días hasta agotamiento
   const stockRisk = risk
     .map(r => ({
-      name:  (r.nombre ?? r.sku).slice(0, 20),
+      name:  resolveName(r.sku, r.nombre),
       dias:  r.dias_estimados_agotamiento ?? (r.horas_estimadas != null ? +(r.horas_estimadas / 24).toFixed(1) : 0),
       nivel: (r.nivel_alerta ?? r.nivel ?? '').toLowerCase(),
     }))
@@ -168,15 +177,15 @@ export default function AdminAnaliticasPage() {
     lowStock.length > 0
       ? lowStock
       : risk.map(r => ({
-          sku:         r.sku,
-          nombre:      r.nombre,
+          sku:          r.sku,
+          nombre:       r.nombre,
           stock_actual: r.stock_actual ?? 0,
           stock_minimo: r.cantidad_reorden_sugerida ?? 0,
         }));
 
   const lowStockChart = lowStockSource
     .map(ls => ({
-      name:   (ls.nombre ?? ls.sku).slice(0, 20),
+      name:   resolveName(ls.sku, ls.nombre),
       actual: ls.stock_actual ?? 0,
       minimo: ls.stock_minimo ?? 0,
     }))
