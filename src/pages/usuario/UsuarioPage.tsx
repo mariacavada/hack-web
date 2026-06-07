@@ -94,7 +94,7 @@ function AICard({ userId }: { userId: string }) {
     <>
       {/* ── Banner card(s) ── */}
       {hasAlert ? (
-        suggestions.map((s, i) => (
+        suggestions.map((_s, i) => (
           <motion.button
             key={i}
             initial={{ opacity: 0, y: 8 }}
