@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
 import { useState } from 'react';
+import arcaLogo from '../assets/logos/arcaContinental.png';
 import { useNavigate, useLocation, Navigate } from 'react-router';
 import { useAuth, pathForRole } from '../auth/AuthContext';
 import type { UserRole } from '../auth/AuthContext';
@@ -75,7 +76,7 @@ export default function LoginPage() {
 };
 
   return (
-    <div className="min-h-screen bg-white flex items-center justify-center px-6">
+    <div className="min-h-screen flex items-center justify-center px-6" style={{ background: 'linear-gradient(135deg, #0A0008 0%, #3B0015 35%, #C5002E 70%, #E61A27 100%)' }}>
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
@@ -85,11 +86,13 @@ export default function LoginPage() {
         <div className="rounded-3xl border border-zinc-200 bg-white p-10 shadow-[0_20px_60px_rgba(0,0,0,0.08)]">
 
           {/* ── Header ── */}
-          <div className="mb-8">
-            <p className="mb-3 text-sm font-medium uppercase tracking-[0.2em] text-[#E61A27]">
-              Bienvenid@!
-            </p>
-            <h1 className="text-4xl font-semibold tracking-tight text-zinc-950">
+          <div className="mb-8 text-center">
+            <img
+              src={arcaLogo}
+              alt="Arca Continental"
+              className="mx-auto mb-6 h-14 w-auto object-contain"
+            />
+            <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">
               Iniciar Sesión
             </h1>
             <p className="mt-3 text-zinc-500">
@@ -183,16 +186,6 @@ export default function LoginPage() {
           </form>
         </div>
 
-        {/* ── Dev shortcut links (remove before production) ── */}
-        {import.meta.env.DEV && (
-          <nav className="mt-4 text-center text-sm text-zinc-400">
-            <ul className="flex justify-center gap-4">
-              <li><a href="/usuario"    className="hover:text-zinc-600">👤 Usuario</a></li>
-              <li><a href="/admin"      className="hover:text-zinc-600">⚙️ Admin</a></li>
-              <li><a href="/repartidor" className="hover:text-zinc-600">🛵 Repartidor</a></li>
-            </ul>
-          </nav>
-        )}
       </motion.div>
     </div>
   );

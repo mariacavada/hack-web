@@ -5,10 +5,10 @@ import { useAuth } from "../../auth/AuthContext";
 
 // --- TYPES & INTERFACES ---
 interface OrderItem {
-  sku: string;
+  sku?: string;
   nombre: string;
   cantidad: number;
-  precio_unitario: number;
+  precio_unitario?: number;
 }
 
 interface TrackingUpdate {
@@ -91,24 +91,22 @@ export default function MisPedidosPage() {
         const data = await response.json();
         console.log(data)
         // Normalización de estructuras de datos
-        const normalizedData = (data || []).map((order: any, idx: number) => ({
-          id_pedido: order.id_pedido || `ORD-${10234 + idx}`,
-          fecha_pedido: order.fecha_pedido || new Date(Date.now() - idx * 24 * 60 * 60 * 1000).toISOString(),
-          status_final: order.status_final || 'Entregado',
-          subtotal: order.SubTotal || order.subtotal || 0,
-          total: order.Total || order.total || 0,
-          cedis_id: order.cedis || order.cedis_id || '3012',
-          items: order.items || [
-            { sku: 'SKU-001', nombre: 'Coca-Cola Original 600ml', cantidad: 12, precio_unitario: 17.50 },
-            { sku: 'SKU-002', nombre: 'Agua Purificada Ciel 1L', cantidad: 6, precio_unitario: 12.00 }
-          ],
-          tracking: order.tracking || [
-            { status: 'Pendiente', timestamp: '10:15 AM', descripcion: 'Pedido registrado en la plataforma.' },
-            { status: 'Confirmado', timestamp: '10:22 AM', descripcion: 'Pedido verificado e inventario asignado.' },
-            { status: order.status_final || 'Entregado', timestamp: '11:45 AM', descripcion: 'Operación concluida de forma correcta.' }
-          ],
-          direccion_entrega: order.direccion_entrega || 'Av. Paseo de la Reforma 222, Interior 4B, CDMX',
-          repartidor: order.repartidor || { nombre: 'Carlos Ramírez', vehiculo: 'Moto (Placas: 72XYZ)' }
+        const normalizedData = (data || []).map((order: any) => ({
+          id_pedido: order.id_pedido || order._id,
+          fecha_pedido: order.fecha_pedido || order.createdAt || new Date().toISOString(),
+          status_final: order.status_final || 'Pendiente',
+          subtotal: order.SubTotal || order.subtotal || order.total || order.Total || 0,
+          total: order.Total || order.total || order.SubTotal || order.subtotal || 0,
+          cedis_id: order.cedis || order.cedis_id || '',
+          items: (order.items || []).map((item: any) => ({
+            sku: item.sku,
+            nombre: item.nombre || item.name || item.sku || 'Producto',
+            cantidad: item.cantidad || item.quantity || 1,
+            precio_unitario: item.precio_unitario ?? item.precio ?? item.price,
+          })),
+          tracking: order.tracking || [],
+          direccion_entrega: order.direccion_entrega || order.direccion || null,
+          repartidor: order.repartidor || null
         }));
 
         setOrders(normalizedData);
@@ -554,11 +552,15 @@ export default function MisPedidosPage() {
                         <div key={index} className="p-3 bg-white flex justify-between items-start text-xs sm:text-sm">
                           <div className="max-w-[70%]">
                             <p className="font-medium text-gray-800 break-words">{item.nombre}</p>
-                            <p className="text-xs text-gray-400 mt-0.5">Precio Unitario: ${item.precio_unitario.toFixed(2)} MXN</p>
+                            {item.precio_unitario != null && (
+                              <p className="text-xs text-gray-400 mt-0.5">Precio Unitario: ${item.precio_unitario.toFixed(2)} MXN</p>
+                            )}
                           </div>
                           <div className="text-right shrink-0">
                             <p className="text-gray-500 font-medium">Cant: {item.cantidad}</p>
-                            <p className="font-semibold text-gray-900 mt-0.5">${(item.cantidad * item.precio_unitario).toFixed(2)}</p>
+                            {item.precio_unitario != null && (
+                              <p className="font-semibold text-gray-900 mt-0.5">${(item.cantidad * item.precio_unitario).toFixed(2)}</p>
+                            )}
                           </div>
                         </div>
                       ))}

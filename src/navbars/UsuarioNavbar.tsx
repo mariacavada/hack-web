@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { motion, AnimatePresence } from "framer-motion";
+import tualiLogo from "../assets/logos/logo.png";
 
 // Cart atom — lift this to context/zustand if you need cross-page reactivity.
 // For now, accepts an optional prop so PedidosPage can pass the count in.
@@ -39,23 +40,12 @@ const Navbar = ({ cartCount = 0 }: NavbarProps) => {
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: isVisible ? 1 : 0, y: isVisible ? 0 : -20 }}
         transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-        className="
-          fixed top-3 left-1/2 -translate-x-1/2 z-50
-          w-[95vw] max-w-4xl
-          bg-white/95 backdrop-blur-md
-          rounded-full
-          border border-slate-200
-          shadow-lg
-          px-4 h-14
-          flex items-center justify-between
-        "
+        className="fixed top-3 left-1/2 -translate-x-1/2 z-50 w-[95vw] max-w-4xl rounded-full shadow-lg px-4 h-14 flex items-center justify-between backdrop-blur-md bg-white/90 border border-zinc-200/70"
       >
         {/* Logo / brand */}
-        <Link to="/usuario" className="flex items-center gap-1.5 flex-shrink-0 pl-1">
-          <span className="text-lg leading-none">🔴</span>
-          <span className="font-extrabold text-sm tracking-tight text-gray-900 hidden sm:block">
-            Tuli
-          </span>
+        <Link to="/usuario" className="flex items-center gap-2 shrink-0 pl-1">
+          <img src={tualiLogo} alt="Tuali" className="h-8 w-auto object-contain" />
+          <span className="font-black text-sm tracking-widest text-neutral-900 hidden sm:block">TUALI</span>
         </Link>
 
         {/* Desktop nav links */}
@@ -73,14 +63,18 @@ const Navbar = ({ cartCount = 0 }: NavbarProps) => {
                     <motion.div
                       layoutId="activeNavbarItem"
                       transition={{ type: "spring", stiffness: 450, damping: 35 }}
-                      className="absolute inset-0 rounded-xl bg-gray-100 border border-gray-200"
+                      className="absolute inset-0 rounded-xl"
+                      style={{
+                        background: 'linear-gradient(rgba(255,240,242,0.97), rgba(255,240,242,0.97)) padding-box, linear-gradient(135deg, #3B0015, #C5002E, #E61A27) border-box',
+                        border: '2px solid transparent',
+                      }}
                     />
                   )}
                   <span
                     className={`relative z-10 transition-colors duration-200 ${
                       isActive
-                        ? "text-neutral-900 font-bold"
-                        : "text-slate-500 hover:text-neutral-900"
+                        ? "text-red-700 font-bold"
+                        : "text-neutral-600 hover:text-neutral-900"
                     }`}
                   >
                     {item.name}
@@ -179,7 +173,7 @@ const Navbar = ({ cartCount = 0 }: NavbarProps) => {
                     whileTap={{ scale: 0.98 }}
                     className={`
                       rounded-xl px-4 py-3 text-sm font-medium transition-all
-                      ${isActive ? "bg-gray-100 text-neutral-900 font-semibold" : "text-slate-600 hover:bg-slate-50"}
+                      ${isActive ? "bg-red-100 text-red-700 font-semibold" : "text-red-900/70 hover:bg-red-50"}
                     `}
                   >
                     {item.name}
