@@ -303,8 +303,19 @@ export default function MisPedidosPage() {
       .finally(() => setIsLoading(false))
   }, [user])
 
+  const todayStart = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }, [])
+
+  const isTodayOrFuture = (o: Order) => {
+    const d = o.fecha_entrega ?? o.fecha_pedido
+    if (!d) return true
+    return new Date(d) >= todayStart
+  }
+
   const activeOrders   = useMemo(() => orders.filter(o => ACTIVE_STATUSES.includes(o.status_final)), [orders])
-  const previousOrders = useMemo(() => orders.filter(o => !ACTIVE_STATUSES.includes(o.status_final)), [orders])
+  const previousOrders = useMemo(
+    () => orders.filter(o => !ACTIVE_STATUSES.includes(o.status_final) && isTodayOrFuture(o)),
+    [orders, todayStart],
+  )
 
   const handleRepeatConfirm = (order: Order) => {
     clear()

@@ -32,6 +32,8 @@ interface Order {
   total: number;
   items: OrderItem[];
   cedis_id?: string;
+  fecha_pedido?: string;
+  fecha_entrega?: string;
 }
 interface Notification { _id: string; leida: boolean; }
 
@@ -377,9 +379,19 @@ export default function UsuarioPage() {
       fetch(`${API}/api/orders/my`, { headers }).then(r => (r.ok ? r.json() : [])),
       fetch(`${API}/api/notifications`, { headers }).then(r => (r.ok ? r.json() : [])),
     ])
-      .then(([orders, notifs]: [Order[], Notification[]]) => {
-        if (Array.isArray(orders)) {
-          const actives = orders.filter(o => !['Entregado', 'Cancelado'].includes(o.status_final));
+      .then(([rawOrders, notifs]: [any[], Notification[]]) => {
+        if (Array.isArray(rawOrders)) {
+          const orders: Order[] = rawOrders.map(o => ({
+            ...o,
+            fecha_pedido:  o.fecha_pedido ?? o.createdAt ?? undefined,
+            fecha_entrega: o.fecha_entrega ?? undefined,
+          }));
+          const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+          const actives = orders.filter(o => {
+            if (['Entregado', 'Cancelado'].includes(o.status_final)) return false;
+            const d = o.fecha_entrega ?? o.fecha_pedido;
+            return !!d && new Date(d) >= todayStart;
+          });
           setActiveOrders(actives);
           if (actives.length === 0 && orders.length > 0) setLastOrder(orders[0]);
           const cid = orders.find(o => o.cedis_id)?.cedis_id ?? null;
