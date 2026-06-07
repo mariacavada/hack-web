@@ -232,20 +232,6 @@ export default function AdminAnaliticasPage() {
           value={`$${(stats?.revenue_total ?? 0).toLocaleString('es-MX', { maximumFractionDigits: 0 })}`} />
       </div>
 
-      {/* Sub-KPIs + Mapa de calor */}
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          { label: 'Activos',     value: stats?.activos    ?? 0, color: 'text-blue-600',   bg: 'bg-blue-50'   },
-          { label: 'Entregados',  value: stats?.entregados ?? 0, color: 'text-green-600',  bg: 'bg-green-50'  },
-          { label: 'Cancelados',  value: stats?.cancelados ?? 0, color: 'text-red-600',    bg: 'bg-red-50'    },
-        ].map(k => (
-          <div key={k.label} className={`${k.bg} rounded-xl border border-transparent p-4 text-center`}>
-            <p className={`text-2xl font-bold ${k.color}`}>{k.value}</p>
-            <p className="text-xs text-gray-500 mt-0.5">{k.label}</p>
-          </div>
-        ))}
-      </div>
-
       {/* Row: Pie + Status bar */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
