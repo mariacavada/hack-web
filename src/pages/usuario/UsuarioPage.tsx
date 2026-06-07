@@ -25,6 +25,33 @@ const STATUS_LABEL: Record<string, string> = {
 };
 const TIMELINE = ['Pendiente', 'Confirmado', 'En preparación', 'En camino', 'Entregado'];
 
+const STATUS_BADGE: Record<string, string> = {
+  'Pendiente':      'bg-yellow-100 text-yellow-700',
+  'Confirmado':     'bg-blue-100 text-blue-700',
+  'En preparación': 'bg-indigo-100 text-indigo-700',
+  'En camino':      'bg-orange-100 text-orange-700',
+  'Entregado':      'bg-green-100 text-green-700',
+  'Incompleto':     'bg-amber-100 text-amber-700',
+  'Cancelado':      'bg-gray-100 text-gray-500',
+};
+
+function normalizeStatus(raw: string): string {
+  const map: Record<string, string> = {
+    pendiente:        'Pendiente',
+    confirmado:       'Confirmado',
+    asignado:         'Confirmado',
+    en_preparacion:   'En preparación',
+    'en preparación': 'En preparación',
+    preparando:       'En preparación',
+    en_camino:        'En camino',
+    'en camino':      'En camino',
+    entregado:        'Entregado',
+    incompleto:       'Incompleto',
+    cancelado:        'Cancelado',
+  };
+  return map[raw?.toLowerCase()] ?? raw ?? 'Pendiente';
+}
+
 interface OrderItem { sku?: string; nombre?: string; cantidad: number; }
 interface Order {
   id_pedido: string;
@@ -98,15 +125,15 @@ function ActiveOrderCard({ order, index }: { order: Order; index: number }) {
       className="w-full bg-gray-50 border border-gray-200 rounded-2xl p-5 text-left shadow-sm hover:border-gray-300 hover:shadow-md transition-all"
     >
       <div className="flex items-center justify-between mb-3">
-        <span className="text-[10px] font-bold uppercase tracking-widest text-[#E61A27]">
-          Pedido activo
+        <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${STATUS_BADGE[order.status_final] ?? 'bg-gray-100 text-gray-600'}`}>
+          {order.status_final}
         </span>
-        <span className="text-xs font-mono font-semibold bg-[#E61A27] text-white px-2.5 py-0.5 rounded-full">
+        <span className="text-xs font-mono text-gray-400">
           {order.id_pedido}
         </span>
       </div>
-      <h2 className="text-lg font-bold text-gray-900 leading-tight">
-        {STATUS_LABEL[order.status_final]}
+      <h2 className="text-base font-bold text-gray-900 leading-tight">
+        {STATUS_LABEL[order.status_final] ?? order.status_final}
       </h2>
       <p className="text-sm text-gray-500 mt-0.5">
         {order.items?.length ?? 0} productos · ${order.total?.toLocaleString('es-MX')} MXN
@@ -356,6 +383,7 @@ export default function UsuarioPage() {
   const [lastOrder, setLastOrder] = useState<Order | null>(null);
   const [unread, setUnread] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [showAllActives, setShowAllActives] = useState(false);
 
   const { add } = useCart();
   const { products, loading: productsLoading } = useProducts();
@@ -383,15 +411,25 @@ export default function UsuarioPage() {
         if (Array.isArray(rawOrders)) {
           const orders: Order[] = rawOrders.map(o => ({
             ...o,
+            status_final:  normalizeStatus(o.status_final ?? 'pendiente'),
             fecha_pedido:  o.fecha_pedido ?? o.createdAt ?? undefined,
             fecha_entrega: o.fecha_entrega ?? undefined,
           }));
           const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
-          const actives = orders.filter(o => {
-            if (['Entregado', 'Cancelado'].includes(o.status_final)) return false;
-            const d = o.fecha_entrega ?? o.fecha_pedido;
-            return !!d && new Date(d) >= todayStart;
-          });
+          const actives = orders
+            .filter(o => {
+              if (['Entregado', 'Cancelado', 'Incompleto'].includes(o.status_final)) return false;
+              const d = o.fecha_entrega ?? o.fecha_pedido;
+              return !!d && new Date(d) >= todayStart;
+            })
+            .sort((a, b) => {
+              const da = a.fecha_entrega ?? a.fecha_pedido;
+              const db = b.fecha_entrega ?? b.fecha_pedido;
+              if (!da && !db) return 0;
+              if (!da) return 1;
+              if (!db) return -1;
+              return new Date(da).getTime() - new Date(db).getTime();
+            });
           setActiveOrders(actives);
           if (actives.length === 0 && orders.length > 0) setLastOrder(orders[0]);
           const cid = orders.find(o => o.cedis_id)?.cedis_id ?? null;
@@ -582,9 +620,17 @@ export default function UsuarioPage() {
           <div className="bg-white rounded-2xl border border-gray-100 h-40 animate-pulse" />
         ) : activeOrders.length > 0 ? (
           <div className="space-y-3">
-            {activeOrders.map((order, i) => (
+            {(showAllActives ? activeOrders : activeOrders.slice(0, 3)).map((order, i) => (
               <ActiveOrderCard key={order.id_pedido} order={order} index={i} />
             ))}
+            {activeOrders.length > 3 && (
+              <button
+                onClick={() => setShowAllActives(v => !v)}
+                className="w-full text-sm font-semibold text-[#E61A27] py-2 hover:opacity-80 transition-opacity"
+              >
+                {showAllActives ? 'Ver menos' : `Ver ${activeOrders.length - 3} pedido${activeOrders.length - 3 !== 1 ? 's' : ''} más`}
+              </button>
+            )}
           </div>
         ) : lastOrder ? (
           <motion.div
