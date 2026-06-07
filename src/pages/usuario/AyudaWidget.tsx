@@ -65,8 +65,8 @@ export default function AyudaWidget() {
 
     try {
       await sendMessage(messageText, activeOrderId ?? undefined);
-    } catch {
-      setError("Ocurrió un error. Inténtalo nuevamente.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Ocurrió un error. Inténtalo nuevamente.");
     }
   };
 
