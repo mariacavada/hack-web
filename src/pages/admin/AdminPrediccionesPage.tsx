@@ -160,6 +160,7 @@ export default function AdminPrediccionesPage() {
   const [selectedCedis, setSelectedCedis] = useState('');
   const [skuNames,    setSkuNames]    = useState<Record<string, string>>({});
   const [results,     setResults]     = useState<MLResult[] | null>(null);
+  const [okCount,     setOkCount]     = useState(0);
   const [cedisNombre, setCedisNombre] = useState('');
   const [loadingInit, setLoadingInit] = useState(true);
   const [running,     setRunning]     = useState(false);
@@ -200,16 +201,17 @@ export default function AdminPrediccionesPage() {
       .finally(() => setLoadingInit(false));
   }, []);
 
-  /* Run ML — backend now responds immediately and runs Gemini in background */
+  /* Run ML — backend responds immediately; Gemini corre en background por SKU */
   const handleRun = async () => {
     if (!selectedCedis) return;
     setRunning(true);
     setError(null);
     setResults(null);
+    setOkCount(0);
     const cedis = cedisList.find(c => c.cedis_id === selectedCedis);
     setCedisNombre(cedis?.nombre ?? selectedCedis);
     try {
-      // 1. Trigger analysis — returns { message, cedis_id } immediately (no timeout)
+      // 1. Trigger — responde de inmediato, el análisis corre en segundo plano
       const triggerRes = await fetch(`${API}/api/ml/stock-predict/cedis`, {
         method: 'POST',
         headers: h,
@@ -217,10 +219,13 @@ export default function AdminPrediccionesPage() {
       });
       if (!triggerRes.ok) throw new Error(`Error ${triggerRes.status}`);
 
-      // 2. Poll depletion-risk while Gemini runs in background (~10-30s for at-risk SKUs)
+      // 2. Poll depletion-risk (bajo + critico) mientras Gemini procesa cada SKU.
+      //    20 intentos: 6s inicial + 4s entre cada uno = hasta ~82s de espera.
+      //    El ML solo llama a Gemini para SKUs donde stock <= minimo*1.5,
+      //    así que si el stock está sano puede terminar en segundos con 0 items.
       let predictions: MLResult[] = [];
-      for (let attempt = 0; attempt < 12; attempt++) {
-        await new Promise(res => setTimeout(res, attempt === 0 ? 5000 : 3000));
+      for (let attempt = 0; attempt < 20; attempt++) {
+        await new Promise(res => setTimeout(res, attempt === 0 ? 6000 : 4000));
         const riskRes = await fetch(
           `${API}/api/admin/inventory/depletion-risk?cedis_id=${selectedCedis}`,
           { headers: h }
@@ -232,7 +237,22 @@ export default function AdminPrediccionesPage() {
         }
       }
 
+      // 3. Si no hay bajo/critico, consultar nivel=ok para saber si el ML
+      //    sí analizó productos pero los clasificó como stock sano.
+      let ok = 0;
+      if (predictions.length === 0) {
+        const okRes = await fetch(
+          `${API}/api/admin/inventory/depletion-risk?cedis_id=${selectedCedis}&nivel=ok`,
+          { headers: h }
+        ).catch(() => null);
+        if (okRes?.ok) {
+          const okData = await okRes.json();
+          ok = (okData.predictions ?? []).length;
+        }
+      }
+
       setResults(predictions);
+      setOkCount(ok);
       setLastRun(new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al ejecutar análisis');
@@ -331,7 +351,7 @@ export default function AdminPrediccionesPage() {
 
         {running && (
           <p className="text-xs text-gray-400 mt-3 text-center">
-            Análisis iniciado — Gemini revisa los productos en riesgo y guarda las predicciones (20-40 seg)
+            Gemini analiza los SKUs cercanos al mínimo de stock — puede tardar hasta 80 seg según cuántos productos estén en riesgo
           </p>
         )}
 
@@ -348,24 +368,49 @@ export default function AdminPrediccionesPage() {
           <motion.div key="results" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
 
             {/* Summary banner */}
-            <div className="bg-gray-900 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <p className="text-white font-bold text-sm">
-                  Predicción completada — {cedisNombre}
-                </p>
-                <p className="text-gray-400 text-xs mt-0.5">
-                  {grouped.total} productos en riesgo detectados · {grouped.hoy.length + grouped.semana.length + grouped.mes.length} necesitan reabastecimiento · {lastRun}
-                </p>
-              </div>
-              {(grouped.hoy.length + grouped.semana.length + grouped.mes.length) > 0 && (
+            {grouped.total > 0 ? (
+              /* ── Hay productos en riesgo ── */
+              <div className="bg-gray-900 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <p className="text-white font-bold text-sm">Predicción completada — {cedisNombre}</p>
+                  <p className="text-gray-400 text-xs mt-0.5">
+                    {grouped.total} producto(s) en riesgo · {grouped.hoy.length + grouped.semana.length + grouped.mes.length} necesitan reabastecimiento · {lastRun}
+                  </p>
+                </div>
                 <button
                   onClick={() => navigate('/admin/cedis')}
                   className="text-xs font-bold bg-[#E61A27] hover:bg-[#C9141A] text-white px-4 py-2 rounded-lg transition-colors whitespace-nowrap"
                 >
                   Ir a CEDIS → crear restock
                 </button>
-              )}
-            </div>
+              </div>
+            ) : okCount > 0 ? (
+              /* ── ML corrió pero todo está bien ── */
+              <div className="bg-green-50 border border-green-200 rounded-xl p-4 flex items-start gap-3">
+                <svg className="w-5 h-5 text-green-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <div>
+                  <p className="text-green-800 font-bold text-sm">Stock en buen estado — {cedisNombre}</p>
+                  <p className="text-green-700 text-xs mt-0.5">
+                    Gemini analizó {okCount} producto(s) y todos tienen stock suficiente para los próximos días. No se requiere reabastecimiento. · {lastRun}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              /* ── El ML no encontró SKUs cerca del umbral ── */
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-start gap-3">
+                <svg className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+                </svg>
+                <div>
+                  <p className="text-blue-800 font-bold text-sm">Sin productos en umbral de riesgo — {cedisNombre}</p>
+                  <p className="text-blue-700 text-xs mt-0.5">
+                    El modelo revisa solo SKUs con stock cercano al mínimo configurado. Ningún producto de este CEDIS alcanzó ese umbral, lo que indica que el inventario está sano. · {lastRun}
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* GRUPO: Pedir HOY */}
             {grouped.hoy.length > 0 && (

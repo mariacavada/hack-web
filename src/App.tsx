@@ -5,7 +5,6 @@ import { ProtectedRoute } from './auth/ProtectedRoute';
 import LoginPage from './pages/LoginPage';
 import UsuarioPage from './pages/usuario/UsuarioPage';
 import AdminPage from './pages/admin/AdminPage';
-import AdminHomePage from './pages/admin/AdminHomePage';
 import AdminAnaliticasPage from './pages/admin/AdminAnaliticasPage';
 import AdminUsuariosPage from './pages/admin/AdminUsuariosPage';
 import AdminCedisPage from './pages/admin/AdminCedisPage';
@@ -42,7 +41,7 @@ const App: React.FC = () => {
           {/* Admin */}
           <Route element={<ProtectedRoute allowedRole="admin" />}>
             <Route path="/admin" element={<AdminLayout />}>
-              <Route index element={<AdminHomePage />} />
+              <Route index element={<Navigate to="/admin/analiticas" replace />} />
               <Route path="pedidos"      element={<AdminPage />} />
               <Route path="predicciones" element={<AdminPrediccionesPage />} />
               <Route path="analiticas"   element={<AdminAnaliticasPage />} />
