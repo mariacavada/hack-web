@@ -1,13 +1,11 @@
-import { useEffect, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router';
+import { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router';
 import { motion, AnimatePresence } from 'framer-motion';
 import RouteMap, { type CedisInfo, type Stop as RouteStop } from './RouteMap';
-import { useAuth } from '../../auth/AuthContext';
 
-const REP_PATH_TAB: Record<string, 'pedidos' | 'ruta' | 'incidencias' | 'perfil'> = {
+const REP_PATH_TAB: Record<string, 'pedidos' | 'ruta' | 'incidencias'> = {
   '/repartidor/ruta':        'ruta',
   '/repartidor/incidencias': 'incidencias',
-  '/repartidor/perfil':      'perfil',
 };
 
 const API = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
@@ -19,10 +17,27 @@ interface AssignedOrder {
   status_final: string;
   usuario?: { nombre?: string; email?: string; direccion?: string };
   direccion_entrega?: string;
+  cliente?: string;
   items?: OrderItem[];
   total?: number;
+  assigned_at?: string;
+  fecha_pedido?: string;
+  fecha_entrega?: string;
   eta_entrega?: string;
   status_actual?: string;
+  lat?: number;
+  lng?: number;
+}
+
+const todayStr = new Date().toDateString();
+function isToday(o: AssignedOrder) {
+  const d = o.assigned_at ?? o.fecha_pedido;
+  return !d || new Date(d).toDateString() === todayStr;
+}
+
+function fmtDate(iso?: string) {
+  if (!iso) return null;
+  return new Date(iso).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 /** Shape returned by GET /api/driver/orders */
@@ -63,6 +78,7 @@ function parseDriverOrders(raw: any): AssignedOrder[] {
         usuario:           o.usuario ?? o.customer ?? null,
         direccion_entrega: o.direccion_entrega ?? o.direccion ?? o.usuario?.direccion ?? null,
         total:             o.total ?? o.subtotal,
+        fecha_entrega:     o.fecha_entrega ?? undefined,
         eta_entrega:       trk.eta_entrega ?? undefined,
         status_actual:     trk.status_actual ?? undefined,
         items: det.map(d => ({
@@ -72,16 +88,25 @@ function parseDriverOrders(raw: any): AssignedOrder[] {
         })),
       } satisfies AssignedOrder;
     }
-    // Flat shape (already an order object)
+    // Flat shape — API returns the order object directly with a detalles[] array
     const o = item as any;
+    const rawDet: any[] = o.detalles ?? o.items ?? [];
     return {
       _id:               o._id ?? o.id_pedido,
       id_pedido:         o.id_pedido,
-      status_final:      normalizeStatus(o.status_final),
+      status_final:      normalizeStatus(o.status_final ?? o.tracking?.status_actual),
       usuario:           o.usuario ?? null,
       direccion_entrega: o.direccion_entrega ?? o.direccion ?? null,
       total:             o.total ?? o.subtotal,
-      items:             o.items ?? o.detalles ?? [],
+      assigned_at:       o.assigned_at ?? undefined,
+      fecha_pedido:      o.fecha_pedido ?? o.created_at ?? undefined,
+      fecha_entrega:     o.fecha_entrega ?? undefined,
+      eta_entrega:       o.tracking?.eta_entrega ?? undefined,
+      items: rawDet.map(d => ({
+        sku:      d.sku_solicitado ?? d.sku ?? '',
+        nombre:   d.nombre_sku_solicitado ?? d.nombre ?? d.sku_solicitado ?? 'Producto',
+        cantidad: d.quantity ?? d.cantidad ?? 1,
+      })),
     } satisfies AssignedOrder;
   });
 }
@@ -97,13 +122,6 @@ interface Route {
   stops?: RouteStop[];
 }
 
-interface DriverProfile {
-  calificacion?: number;
-  total_entregas?: number;
-  tiempo_promedio?: number;
-  area?: string;
-  zona?: string;
-}
 
 const STATUS_BADGE: Record<string, string> = {
   'Pendiente':      'bg-yellow-100 text-yellow-700',
@@ -132,24 +150,20 @@ const INCIDENT_TYPES = [
 ];
 
 export default function RepartidorPage() {
-  const { user, logout } = useAuth();
-  const navigate = useNavigate();
   const location = useLocation();
 
   const [orders, setOrders]               = useState<AssignedOrder[]>([]);
   const [route, setRoute]                 = useState<Route | null>(null);
   const [cedisLocation, setCedisLocation] = useState<CedisInfo | null>(null);
-  const [profile, setProfile]             = useState<DriverProfile | null>(null);
   const [loading, setLoading]             = useState(true);
-  const [activeTab, setActiveTab]         = useState<'pedidos' | 'ruta' | 'incidencias' | 'perfil'>(
+  const [statusError, setStatusError]     = useState<string | null>(null);
+  const [activeTab, setActiveTab]         = useState<'pedidos' | 'ruta' | 'incidencias'>(
     REP_PATH_TAB[location.pathname] ?? 'pedidos'
   );
 
   useEffect(() => {
     setActiveTab(REP_PATH_TAB[location.pathname] ?? 'pedidos');
   }, [location.pathname]);
-
-  const handleLogout = () => { logout(); navigate('/', { replace: true }); };
 
   // Incident form state
   const [incidentOrder, setIncidentOrder] = useState('');
@@ -167,38 +181,83 @@ export default function RepartidorPage() {
   const [showMissingForm, setShowMissingForm] = useState(false);
   const [missingNotes, setMissingNotes]       = useState('');
 
+  // Filter for future assigned orders in the route view
+  const [showFutureStops, setShowFutureStops] = useState(false);
+  const [futureDays, setFutureDays] = useState<number>(3);
+
   const token = localStorage.getItem('or_token') ?? '';
   const h = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+
+  const getCurrentCoords = async (): Promise<{ lat: number; lng: number } | null> => {
+    if (!navigator.geolocation) return null;
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        () => resolve(null),
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 10000 },
+      );
+    });
+  };
 
   useEffect(() => {
     Promise.all([
       fetch(`${API}/api/driver/orders`,      { headers: h }).then(r => r.ok ? r.json() : []),
       fetch(`${API}/api/driver/route/today`, { headers: h }).then(r => r.ok ? r.json() : null),
-      fetch(`${API}/api/driver/profile`,     { headers: h }).then(r => r.ok ? r.json() : null),
-      fetch(`${API}/api/map/overview`,       { headers: h }).then(r => r.ok ? r.json() : null),
+      fetch(`${API}/api/driver/cedis`,       { headers: h }).then(r => r.ok ? r.json() : null),
     ])
-      .then(([o, r, p, mapData]) => {
+      .then(([o, r, cedisData]) => {
         const fetchedOrders: AssignedOrder[] = parseDriverOrders(Array.isArray(o) ? o : o?.orders ?? []);
-        const fetchedRoute: Route | null     = r && typeof r === 'object' ? r : null;
+
+        // Map paradas[] (API name) → stops[] (local name), extracting coords from multiple possible shapes
+        const fetchedRoute: Route | null = r && typeof r === 'object' ? {
+          ...r,
+          stops: (r.paradas ?? r.stops ?? []).map((p: any, idx: number) => ({
+            order_id:    p.order_id ?? p.id_pedido,
+            id_pedido:   p.id_pedido ?? p.order_id,
+            cliente:     p.cliente ?? p.nombre_cliente ?? p.usuario?.nombre ?? p.usuario,
+            direccion:   p.direccion ?? p.direccion_entrega,
+            stop_number: p.stop_number ?? p.numero_parada ?? idx + 1,
+            status:      p.status ?? p.estado,
+            eta:         p.eta ?? p.eta_entrega,
+            lat:         p.lat ?? p.coords?.lat ?? p.ubicacion?.lat,
+            lng:         p.lng ?? p.coords?.lng ?? p.ubicacion?.lng,
+          })),
+        } : null;
 
         setOrders(fetchedOrders);
         setRoute(fetchedRoute);
-        setProfile(p && typeof p === 'object' ? p : null);
 
-        // Match CEDIS from map overview to the driver's route
-        if (mapData?.cedis?.length) {
-          const allCedis: any[] = mapData.cedis;
-          let match = fetchedRoute?.cedis_id
-            ? allCedis.find(c => c.cedis_id === fetchedRoute.cedis_id)
-            : null;
-          if (!match) match = allCedis[0];
-          if (match?.ubicacion) {
-            setCedisLocation({
-              lat: match.ubicacion.lat,
-              lng: match.ubicacion.lng,
-              nombre: match.nombre ?? 'CEDIS',
-            });
-          }
+        if (cedisData?.ubicacion) {
+          setCedisLocation({
+            lat:    cedisData.ubicacion.lat,
+            lng:    cedisData.ubicacion.lng,
+            nombre: cedisData.nombre ?? 'CEDIS',
+          });
+        }
+
+        // Enrich today's orders with customer coords + address (non-blocking)
+        const todayParsed = fetchedOrders.filter(isToday);
+        if (todayParsed.length > 0) {
+          Promise.all(
+            todayParsed.map(o =>
+              fetch(`${API}/api/driver/orders/${o._id}/customer-location`, { headers: h })
+                .then(r => r.ok ? r.json() : null)
+                .catch(() => null)
+            )
+          ).then(locations => {
+            setOrders(prev => prev.map(o => {
+              const idx = todayParsed.findIndex(t => t._id === o._id);
+              const cl = idx >= 0 ? locations[idx] : null;
+              if (!cl?.ubicacion) return o;
+              return {
+                ...o,
+                cliente:           cl.cliente ?? o.cliente,
+                direccion_entrega: [cl.ubicacion.direccion, cl.ubicacion.municipio].filter(Boolean).join(', ') || o.direccion_entrega,
+                lat:               cl.ubicacion.lat,
+                lng:               cl.ubicacion.lng,
+              };
+            }));
+          });
         }
       })
       .catch(() => {})
@@ -206,21 +265,105 @@ export default function RepartidorPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const todayOrders = useMemo(() => orders.filter(isToday), [orders]);
+
+  const futureStops = useMemo(() => {
+    if (!orders.length) return [] as RouteStop[];
+
+    // IDs already present in today's route — skip them to avoid duplicates
+    const routeIds = new Set(
+      (route?.stops ?? []).map(s => s.id_pedido ?? s.order_id).filter(Boolean)
+    );
+
+    const now = new Date();
+    const end = new Date();
+    end.setDate(now.getDate() + Math.max(1, futureDays));
+
+    return orders
+      .filter(o => {
+        if (['Entregado', 'Cancelado'].includes(o.status_final)) return false;
+        if (routeIds.has(o.id_pedido)) return false;
+        // Try any available date; if none, include the order (undated active order)
+        const dateStr = o.eta_entrega ?? o.fecha_entrega ?? o.fecha_pedido;
+        if (!dateStr) return true;
+        const d = new Date(dateStr);
+        return d > now && d <= end;
+      })
+      .map<RouteStop>(o => ({
+        order_id:    o._id,
+        id_pedido:   o.id_pedido,
+        cliente:     o.cliente ?? o.usuario?.nombre ?? '',
+        direccion:   o.direccion_entrega ?? '',
+        stop_number: undefined,
+        status:      o.status_final,
+        eta:         o.eta_entrega ?? o.fecha_entrega ?? o.fecha_pedido,
+        lat:         o.lat,
+        lng:         o.lng,
+      }));
+  }, [orders, futureDays, route?.stops]);
+
+  // Today's orders as map stops (used when there is no active route)
+  const orderStops = useMemo<RouteStop[]>(() =>
+    todayOrders.map((o, idx) => ({
+      order_id:    o._id,
+      id_pedido:   o.id_pedido,
+      cliente:     o.cliente ?? o.usuario?.nombre ?? '',
+      direccion:   o.direccion_entrega ?? '',
+      stop_number: idx + 1,
+      status:      o.status_final === 'Entregado' ? 'completada' : o.status_final,
+      eta:         o.eta_entrega ?? o.fecha_entrega ?? o.fecha_pedido,
+      lat:         o.lat,
+      lng:         o.lng,
+    })),
+  [todayOrders]);
+
+  const mergedStops = useMemo(() => {
+    const base = route?.stops ?? [];
+    if (!showFutureStops) return base;
+    return [...base, ...futureStops];
+  }, [route?.stops, showFutureStops, futureStops]);
+
+  // If the route has no stops yet, fall back to order stops so the map shows customer pins
+  const effectiveStops = useMemo(
+    () => mergedStops.length > 0 ? mergedStops : orderStops,
+    [mergedStops, orderStops],
+  );
+
   // ── Order-level status update ──────────────────────────────────────────────
   // The API uses id_pedido (string), not mongo _id
-  const updateOrderStatus = async (order: AssignedOrder, status: 'en_camino' | 'entregado') => {
+  const updateOrderStatus = async (
+    order: AssignedOrder,
+    status: 'recibido' | 'preparando' | 'en_camino' | 'entregado' | 'incompleto',
+  ) => {
     const apiId = order.id_pedido ?? order._id;
     setUpdatingId(order._id);
+    setStatusError(null);
     try {
+      const coords = await getCurrentCoords();
+      const body: Record<string, unknown> = { status };
+      if (coords) body.coords = coords;
       const res = await fetch(`${API}/api/driver/orders/${apiId}/status`, {
         method: 'PATCH',
         headers: h,
-        body: JSON.stringify({ status }),
+        body: JSON.stringify(body),
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        const label = status === 'en_camino' ? 'En camino' : 'Entregado';
-        setOrders(prev => prev.map(o => o._id === order._id ? { ...o, status_final: label } : o));
+        // Use the status returned by the API; fall back to local mapping
+        const newStatus = normalizeStatus(data?.order?.status_final ?? data?.status ?? status);
+        setOrders(prev => {
+          const updated = prev.map(o => o._id === order._id ? { ...o, status_final: newStatus } : o);
+          if (newStatus === 'Entregado') {
+            const allDone = updated.filter(isToday).every(o => o.status_final === 'Entregado');
+            if (allDone) setRoute(r => r ? { ...r, current_status: 'entregado' } : r);
+          }
+          return updated;
+        });
+      } else {
+        setStatusError(data?.message ?? `Error al actualizar el estado (${res.status})`);
       }
+    } catch {
+      setStatusError('No se pudo conectar con el servidor.');
     } finally {
       setUpdatingId(null);
     }
@@ -255,17 +398,23 @@ export default function RepartidorPage() {
     const stopNum = stop?.stop_number ?? stopIndex + 1;
     setCompletingStop(stopIndex);
     try {
+      const coords = await getCurrentCoords();
+      const body: Record<string, unknown> = {};
+      if (coords) body.coords = coords;
       const res = await fetch(`${API}/api/driver/route/${route._id}/stop/${stopNum}/complete`, {
         method: 'PATCH',
         headers: h,
+        body: JSON.stringify(body),
       });
       if (res.ok) {
+        const data = await res.json().catch(() => ({}));
         setRoute(prev => {
           if (!prev?.stops) return prev;
           const stops = prev.stops.map((s, i) =>
             i === stopIndex ? { ...s, status: 'completada' } : s
           );
-          return { ...prev, stops };
+          const allDone = data?.todasCompletas ?? stops.every(s => s.status === 'completada');
+          return { ...prev, stops, ...(allDone ? { current_status: 'entregado' } : {}) };
         });
       }
     } finally {
@@ -315,10 +464,16 @@ export default function RepartidorPage() {
     if (!incidentOrder || !incidentDesc.trim()) return;
     setSubmitting(true);
     try {
+      const coords = await getCurrentCoords();
+      const body: Record<string, unknown> = {
+        tipo: incidentType,
+        descripcion: incidentDesc,
+      };
+      if (coords) body.coords = coords;
       await fetch(`${API}/api/driver/orders/${incidentOrder}/incident`, {
         method: 'POST',
         headers: h,
-        body: JSON.stringify({ tipo: incidentType, descripcion: incidentDesc }),
+        body: JSON.stringify(body),
       });
       setIncidentDone(true);
       setIncidentDesc('');
@@ -336,7 +491,6 @@ export default function RepartidorPage() {
     );
   }
 
-  const deliveredOrders = orders.filter(o => o.status_final === 'Entregado');
   const routeStatus     = route?.current_status ?? 'programado';
   const routeStatusMeta = ROUTE_STATUS_LABEL[routeStatus];
 
@@ -346,7 +500,15 @@ export default function RepartidorPage() {
       {/* ── PEDIDOS ASIGNADOS ──────────────────────────────────────────────── */}
       {activeTab === 'pedidos' && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-3">
-          {orders.length === 0 ? (
+          {statusError && (
+            <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-sm font-medium rounded-xl px-4 py-3">
+              <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+              </svg>
+              {statusError}
+            </div>
+          )}
+          {todayOrders.length === 0 ? (
             <div className="bg-white rounded-2xl border border-dashed border-gray-200 p-12 text-center">
               <div className="w-12 h-12 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
                 <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
@@ -356,7 +518,7 @@ export default function RepartidorPage() {
               <p className="text-gray-900 font-semibold text-sm">Sin pedidos asignados</p>
               <p className="text-gray-400 text-xs mt-1">Los pedidos aparecerán aquí cuando sean asignados.</p>
             </div>
-          ) : orders.map(o => {
+          ) : todayOrders.map(o => {
             const address   = o.direccion_entrega ?? o.usuario?.direccion;
             const isUpdating = updatingId === o._id;
 
@@ -369,9 +531,6 @@ export default function RepartidorPage() {
                     </span>
                     <span className="text-xs font-mono text-gray-400">{o.id_pedido ?? o._id}</span>
                   </div>
-                  {o.total !== undefined && (
-                    <span className="text-sm font-bold text-gray-900 tabular-nums">${o.total.toLocaleString('es-MX')} MXN</span>
-                  )}
                 </div>
 
                 {address && (
@@ -383,13 +542,16 @@ export default function RepartidorPage() {
                   </div>
                 )}
 
-                {o.eta_entrega && (
+                {(o.fecha_entrega || o.fecha_pedido) && (
                   <div className="px-4 pb-2 flex items-center gap-2">
                     <svg className="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                     </svg>
                     <p className="text-xs text-gray-500">
-                      ETA: <span className="font-semibold text-gray-700">{o.eta_entrega}</span>
+                      {o.fecha_entrega ? 'Entrega' : 'Pedido'}:{' '}
+                      <span className="font-semibold text-gray-700">
+                        {fmtDate(o.fecha_entrega ?? o.fecha_pedido)}
+                      </span>
                     </p>
                   </div>
                 )}
@@ -472,8 +634,28 @@ export default function RepartidorPage() {
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
 
           {/* Map + stop list */}
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={showFutureStops} onChange={e => setShowFutureStops(e.target.checked)} className="w-4 h-4" />
+                <span className="text-sm text-gray-600">Incluir pedidos futuros</span>
+              </label>
+              {showFutureStops && (
+                <div className="ml-2">
+                  <label className="text-xs text-gray-400 mr-2">Dentro de</label>
+                  <select value={String(futureDays)} onChange={e => setFutureDays(Number(e.target.value))} className="text-sm border border-gray-200 rounded-md px-2 py-1">
+                    <option value="1">1 día</option>
+                    <option value="3">3 días</option>
+                    <option value="7">7 días</option>
+                  </select>
+                </div>
+              )}
+            </div>
+            <div className="text-xs text-gray-400">Mostrando {effectiveStops.length} paradas</div>
+          </div>
+
           <RouteMap
-            stops={route?.stops ?? []}
+            stops={effectiveStops}
             cedis={cedisLocation}
             canComplete={['salio', 'en_camino'].includes(routeStatus)}
             completingStop={completingStop}
@@ -691,69 +873,6 @@ export default function RepartidorPage() {
         </motion.div>
       )}
 
-      {/* ── PERFIL ─────────────────────────────────────────────────────────── */}
-      {activeTab === 'perfil' && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 flex items-center gap-4">
-            <div className="w-16 h-16 rounded-2xl bg-[#E61A27] flex items-center justify-center shrink-0">
-              <span className="text-white font-extrabold text-2xl">
-                {(user?.nombre ?? 'R')[0].toUpperCase()}
-              </span>
-            </div>
-            <div>
-              <h2 className="text-xl font-bold text-gray-900">{user?.nombre ?? 'Repartidor'}</h2>
-              <p className="text-sm text-gray-400 mt-0.5">
-                {profile?.area ?? profile?.zona ?? (route as any)?.area ?? (route as any)?.zona ?? 'Repartidor de campo'}
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-3">
-            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 text-center">
-              <p className="text-xl font-bold text-gray-900 tabular-nums">
-                {profile?.calificacion != null ? profile.calificacion.toFixed(1) : '—'}
-              </p>
-              <p className="text-[11px] text-gray-400 mt-1 leading-tight font-medium">Calificación</p>
-            </div>
-            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 text-center">
-              <p className="text-xl font-bold text-gray-900 tabular-nums">
-                {profile?.total_entregas != null
-                  ? profile.total_entregas.toLocaleString('es-MX')
-                  : deliveredOrders.length > 0 ? deliveredOrders.length : '—'}
-              </p>
-              <p className="text-[11px] text-gray-400 mt-1 leading-tight font-medium">Entregas</p>
-            </div>
-            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 text-center">
-              <p className="text-xl font-bold text-gray-900 tabular-nums">
-                {profile?.tiempo_promedio != null ? `${profile.tiempo_promedio}m` : '—'}
-              </p>
-              <p className="text-[11px] text-gray-400 mt-1 leading-tight font-medium">T. promedio</p>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-            <button
-              onClick={() => navigate('/repartidor/ruta')}
-              className="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-50 transition-colors text-left"
-            >
-              <span className="text-sm font-medium text-gray-900">Mis rutas</span>
-              <svg className="w-4 h-4 text-gray-300" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
-          </div>
-
-          <button
-            onClick={handleLogout}
-            className="w-full h-14 bg-white border border-red-100 text-[#E61A27] font-bold text-base rounded-2xl hover:bg-red-50 transition-colors flex items-center justify-center gap-2"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-            </svg>
-            Cerrar sesión
-          </button>
-        </motion.div>
-      )}
     </div>
   );
 }

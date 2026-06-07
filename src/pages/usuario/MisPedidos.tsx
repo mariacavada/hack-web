@@ -18,6 +18,7 @@ interface OrderItem {
 interface Order {
   id_pedido: string;
   fecha_pedido: string;
+  fecha_entrega?: string;
   status_final: string;
   subtotal: number;
   total: number;
@@ -113,7 +114,15 @@ function OrderDrawer({
         <div className="flex items-center justify-between px-5 pt-2 pb-4 border-b border-gray-100 shrink-0">
           <div>
             <h2 className="text-base font-bold text-gray-900">{order.id_pedido}</h2>
-            <p className="text-xs text-gray-400 mt-0.5">{fmtDate(order.fecha_pedido)}</p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Pedido: {fmtDate(order.fecha_pedido)}
+              {order.fecha_entrega && (
+                <>
+                  <br />
+                  Entrega: {fmtDate(order.fecha_entrega)}
+                </>
+              )}
+            </p>
           </div>
           <div className="flex items-center gap-3">
             <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${STATUS_BADGE[order.status_final] ?? 'bg-gray-100 text-gray-600'}`}>
@@ -275,6 +284,7 @@ export default function MisPedidosPage() {
         setOrders((data ?? []).map(o => ({
           id_pedido:         o.id_pedido ?? o._id,
           fecha_pedido:      o.fecha_pedido ?? o.createdAt ?? new Date().toISOString(),
+          fecha_entrega:     o.fecha_entrega,
           status_final:      normalizeStatus(o.status_final ?? 'pendiente'),
           subtotal:          o.subtotal ?? o.SubTotal ?? o.total ?? 0,
           total:             o.total ?? o.Total ?? o.subtotal ?? 0,
@@ -370,7 +380,7 @@ export default function MisPedidosPage() {
                           </span>
                         </div>
                         <p className="text-xs text-gray-400 mt-0.5">
-                          {groupItems(order.items).length} producto{groupItems(order.items).length !== 1 ? 's' : ''} · llega hoy
+                          {groupItems(order.items).reduce((s, i) => s + i.cantidad, 0)} producto{groupItems(order.items).reduce((s, i) => s + i.cantidad, 0) !== 1 ? 's' : ''} · {order.fecha_entrega ? `Entrega: ${fmtDate(order.fecha_entrega)}` : 'Fecha por confirmar'}
                         </p>
                       </div>
                       <svg className="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">

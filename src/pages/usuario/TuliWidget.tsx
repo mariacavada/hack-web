@@ -11,22 +11,14 @@ const AGENT_ID = "agent_8101ktfn5na9eczr7c8c78r5r53y";
 function TuliWidgetInner() {
   const navigate = useNavigate();
   const { products } = useProducts();
-  const { cart, changeQty, setQty } = useCart();
+  const { cart, setQty } = useCart();
   const cartRef = useRef(cart);
   const productsRef = useRef(products);
   const [isOpen, setIsOpen] = useState(false);
   const [micError, setMicError] = useState<string | null>(null);
-  const [toolDebug, setToolDebug] = useState<string | null>(null);
-
   const { startSession, endSession, status, isSpeaking, sendContextualUpdate } = useConversation({
     onConnect: () => setMicError(null),
     onError: (error) => setMicError(String(error)),
-    onAgentToolRequest: (request) => {
-      setToolDebug(`Tool request: ${request.toolName} ${JSON.stringify(request.parameters)}`);
-    },
-    onUnhandledClientToolCall: (call) => {
-      setToolDebug(`Unhandled tool call: ${call.toolName}`);
-    },
   });
 
   useEffect(() => {

@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useCallback, useEffect, type React
 import type { Cart, Product } from "./types";
 
 const CART_STORAGE_KEY = "or_cart";
+const FECHA_STORAGE_KEY = "or_cart_fechaEntrega";
 
 function loadCartFromStorage(): Cart {
   if (typeof window === "undefined") return {};
@@ -13,11 +14,28 @@ function loadCartFromStorage(): Cart {
     return Object.fromEntries(
       Object.entries(parsed)
         .map(([sku, qty]) => [sku, Number(qty)])
-        .filter(([, qty]) => Number.isFinite(qty) && qty > 0)
+        .filter(([, qty]) => Number.isFinite(qty as number) && (qty as number) > 0)
     );
   } catch {
     return {};
   }
+}
+
+function loadFechaEntregaFromStorage(): string {
+  if (typeof window === "undefined") {
+    // Fallback: hoy + 3 días
+    const d = new Date();
+    d.setDate(d.getDate() + 3);
+    return d.toISOString().slice(0, 10);
+  }
+  try {
+    const raw = window.localStorage.getItem(FECHA_STORAGE_KEY);
+    if (raw) return String(raw);
+  } catch {}
+  // Fallback: hoy + 3 días si no hay nada guardado
+  const d = new Date();
+  d.setDate(d.getDate() + 3);
+  return d.toISOString().slice(0, 10);
 }
 
 interface CartContextValue {
@@ -29,12 +47,15 @@ interface CartContextValue {
   changeQty: (sku: string, delta: number) => void;
   setQty: (sku: string, qty: number) => void;
   clear: () => void;
+  fechaEntrega: string;
+  setFechaEntrega: (d: string) => void;
 }
 
 const CartContext = createContext<CartContextValue | null>(null);
 
 export function CartProvider({ children }: { children: ReactNode }) {
   const [cart, setCart] = useState<Cart>(() => loadCartFromStorage());
+  const [fechaEntrega, setFechaEntrega] = useState<string>(() => loadFechaEntregaFromStorage());
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -44,6 +65,11 @@ export function CartProvider({ children }: { children: ReactNode }) {
       window.localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cart));
     }
   }, [cart]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(FECHA_STORAGE_KEY, fechaEntrega);
+  }, [fechaEntrega]);
 
   const add = useCallback((product: Product) => {
     setCart((prev) => ({ ...prev, [product.sku]: (prev[product.sku] ?? 0) + 1 }));
@@ -83,7 +109,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const totalPrice = 0; // calculated in consumers who have access to mockProducts
 
   return (
-    <CartContext.Provider value={{ cart, totalItems, totalPrice, add, remove, changeQty, setQty, clear }}>
+    <CartContext.Provider value={{ cart, totalItems, totalPrice, add, remove, changeQty, setQty, clear, fechaEntrega, setFechaEntrega }}>
       {children}
     </CartContext.Provider>
   );

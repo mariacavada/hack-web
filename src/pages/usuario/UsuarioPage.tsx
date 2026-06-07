@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../../auth/AuthContext';
+import { useCart } from './CartContext';
+import { useProducts } from './ProductsContext';
 
 const API = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
 const SUB_PREF_KEY = 'or_sub_prefs';
@@ -353,11 +355,14 @@ export default function UsuarioPage() {
   const [unread, setUnread] = useState(0);
   const [loading, setLoading] = useState(true);
 
+  const { add } = useCart();
+  const { products, loading: productsLoading } = useProducts();
   const [reorderPatterns, setReorderPatterns] = useState<ReorderPattern[]>([]);
   const [stockAlerts, setStockAlerts] = useState<StockAlert[]>([]);
   const [subPrefs, setSubPrefs] = useState<Record<string, SubPref>>(loadSubPrefs);
   const [selectedAlert, setSelectedAlert] = useState<StockAlert | null>(null);
   const [cedisId, setCedisId] = useState<string | null>(null);
+  const [recommendationAdded, setRecommendationAdded] = useState(false);
   const mlFetchedRef = useRef(false);
 
   useEffect(() => {
@@ -442,6 +447,31 @@ export default function UsuarioPage() {
     });
   }, [cedisId, user?.id]);
 
+  useEffect(() => {
+    setRecommendationAdded(false);
+  }, [reorderPatterns]);
+
+  const recommendedProducts = useMemo(() => {
+    const seen = new Set<string>();
+    return reorderPatterns
+      .map((pattern) => {
+        const product = products.find((p) => p.sku === pattern.sku);
+        return product ? { pattern, product } : null;
+      })
+      .filter((item): item is { pattern: ReorderPattern; product: { sku: string; nombre: string; precio: number; categoria: string } } => item !== null)
+      .filter((item) => {
+        if (seen.has(item.pattern.sku)) return false;
+        seen.add(item.pattern.sku);
+        return true;
+      });
+  }, [products, reorderPatterns]);
+
+  const handleAddRecommendedToCart = () => {
+    if (recommendedProducts.length === 0) return;
+    recommendedProducts.forEach(({ product }) => add(product));
+    setRecommendationAdded(true);
+  };
+
   const firstName = user?.nombre?.split(' ')[0] ?? 'Usuario';
   const riskBg: Record<string, string> = {
     critico: 'border-red-200 bg-red-50',
@@ -491,6 +521,50 @@ export default function UsuarioPage() {
             </button>
           )}
         </div>
+
+        {recommendedProducts.length > 0 && !productsLoading && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-yellow-50 border border-yellow-200 rounded-2xl p-4 space-y-3"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] uppercase tracking-widest font-bold text-yellow-600">
+                  Recomendación ML
+                </p>
+                <h2 className="text-lg font-semibold text-gray-900 mt-1">
+                  Te recomendamos hacer un pedido
+                </h2>
+                <p className="text-sm text-gray-600 mt-1">
+                  En base a tus pedidos pasados te recomendamos hacer el siguiente pedido.
+                </p>
+              </div>
+              <button
+                onClick={handleAddRecommendedToCart}
+                disabled={recommendationAdded}
+                className={`rounded-2xl px-4 py-2 text-sm font-semibold transition-colors ${
+                  recommendationAdded
+                    ? 'bg-gray-200 text-gray-600 cursor-default'
+                    : 'bg-yellow-500 text-white hover:bg-yellow-600'
+                }`}
+              >
+                {recommendationAdded ? 'Agregados al carrito' : 'Agregar recomendados'}
+              </button>
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-2">
+              {recommendedProducts.slice(0, 3).map(({ pattern, product }) => (
+                <div key={pattern.sku} className="rounded-2xl border border-yellow-100 bg-white p-3">
+                  <p className="text-sm font-semibold text-gray-900 truncate">{product.nombre}</p>
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    Próximo pedido estimado: {pattern.proximo_pedido ? new Date(pattern.proximo_pedido).toLocaleDateString('es-MX') : 'Próximamente'}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
 
         {loading ? (
           <div className="bg-white rounded-2xl border border-gray-100 h-40 animate-pulse" />
