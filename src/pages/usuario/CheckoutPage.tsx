@@ -1,10 +1,54 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { motion, AnimatePresence } from "framer-motion";
 import { mockProducts } from "./MockProducts";
 import { useCart } from "./CartContext";
 import { useAuth } from "../../auth/AuthContext";
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
+
+// ── Editable quantity input ───────────────────────────────────────────────────
+function QtyInput({ qty, onCommit }: { qty: number; onCommit: (n: number) => void }) {
+  const [val, setVal] = useState(String(qty));
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { setVal(String(qty)); }, [qty]);
+
+  const commit = () => {
+    const n = parseInt(val, 10);
+    if (!n || n < 1 || !isFinite(n)) { setVal(String(qty)); return; }
+    const capped = Math.min(n, 999);
+    setVal(String(capped));
+    if (capped !== qty) onCommit(capped);
+  };
+
+  return (
+    <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-xl px-1 py-0.5 shrink-0">
+      <button
+        onClick={() => onCommit(Math.max(1, qty - 1))}
+        className="w-6 h-6 rounded-lg bg-white border border-gray-200 text-gray-600 flex items-center justify-center text-sm font-bold hover:bg-gray-100 transition-colors"
+      >
+        −
+      </button>
+      <input
+        ref={inputRef}
+        type="text"
+        inputMode="numeric"
+        value={val}
+        onChange={e => { if (/^\d*$/.test(e.target.value)) setVal(e.target.value); }}
+        onBlur={commit}
+        onKeyDown={e => e.key === 'Enter' && commit()}
+        className="w-8 text-xs font-bold font-mono text-center text-gray-800 bg-transparent focus:outline-none"
+        aria-label="Cantidad"
+      />
+      <button
+        onClick={() => onCommit(Math.min(999, qty + 1))}
+        className="w-6 h-6 rounded-lg bg-red-600 text-white flex items-center justify-center text-sm font-bold hover:bg-red-700 transition-colors"
+      >
+        +
+      </button>
+    </div>
+  );
+}
 
 interface ConfirmModalProps {
   onClose: () => void;
@@ -27,7 +71,7 @@ function ConfirmModal({ onClose }: ConfirmModalProps) {
         initial={{ opacity: 0, scale: 0.95, y: 10 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 10 }}
-        className="bg-white rounded-lg p-6 max-w-sm w-full text-center shadow-xl relative z-10 border border-gray-200"
+        className="bg-white rounded-2xl p-6 max-w-sm w-full text-center shadow-xl relative z-10 border border-gray-200"
       >
         <span className="text-5xl block mb-3">🎉</span>
         <h2 className="text-lg font-bold text-gray-900 mb-1.5">¡Pedido realizado con éxito!</h2>
@@ -36,7 +80,7 @@ function ConfirmModal({ onClose }: ConfirmModalProps) {
         </p>
         <button
           onClick={onClose}
-          className="w-full bg-red-600 hover:bg-red-700 text-white font-semibold text-sm py-2.5 rounded transition-colors shadow-sm"
+          className="w-full bg-red-600 hover:bg-red-700 text-white font-semibold text-sm py-2.5 rounded-xl transition-colors shadow-sm"
         >
           Ver mis pedidos
         </button>
@@ -119,7 +163,7 @@ export default function CheckoutPage() {
         <p className="text-xs text-gray-400 mt-1 max-w-xs">Agrega productos líquidos e insumos desde la tienda antes de proceder.</p>
         <button
           onClick={() => navigate("/usuario/tienda")}
-          className="mt-5 bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded text-xs font-semibold hover:bg-gray-50 transition-colors shadow-sm"
+          className="mt-5 bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-xl text-xs font-semibold hover:bg-gray-50 transition-colors shadow-sm"
         >
           Regresar al catálogo
         </button>
@@ -147,7 +191,7 @@ export default function CheckoutPage() {
         <div className="flex flex-col lg:flex-row gap-5 items-start">
 
           {/* Columna Izquierda: Lista limpia de artículos */}
-          <div className="flex-1 w-full bg-white rounded-lg border border-gray-200 shadow-sm divide-y divide-gray-100 overflow-hidden">
+          <div className="flex-1 w-full bg-white rounded-2xl border border-gray-200 shadow-sm divide-y divide-gray-100 overflow-hidden">
             {items.map((p) => {
               const qty = cart[p.sku] ?? 0;
               return (
@@ -158,22 +202,11 @@ export default function CheckoutPage() {
                     <p className="text-[11px] text-gray-400 mt-0.5">${p.precio.toFixed(2)} c/u</p>
                   </div>
                   
-                  {/* Control de cantidad compacto */}
-                  <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded p-0.5 shrink-0">
-                    <button
-                      onClick={() => changeQty(p.sku, -1)}
-                      className="w-5 h-5 rounded bg-white border border-gray-200 text-gray-600 flex items-center justify-center text-xs font-bold hover:bg-gray-100 transition-colors"
-                    >
-                      −
-                    </button>
-                    <span className="text-xs font-mono font-bold w-4 text-center text-gray-800">{qty}</span>
-                    <button
-                      onClick={() => changeQty(p.sku, 1)}
-                      className="w-5 h-5 rounded bg-red-600 text-white flex items-center justify-center text-xs font-bold hover:bg-red-700 transition-colors"
-                    >
-                      +
-                    </button>
-                  </div>
+                  {/* Editable quantity */}
+                  <QtyInput
+                    qty={qty}
+                    onCommit={n => changeQty(p.sku, n - qty)}
+                  />
                   
                   <span className="text-xs font-bold text-gray-900 w-16 text-right shrink-0 font-mono">
                     ${(p.precio * qty).toFixed(2)}
@@ -185,7 +218,7 @@ export default function CheckoutPage() {
 
           {/* Columna Derecha: Tarjeta de Resumen (Clean & Light Surface) */}
           <div className="w-full lg:w-80 shrink-0">
-            <div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm sticky top-24 space-y-4">
+            <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm sticky top-24 space-y-4">
               <h2 className="text-xs font-bold uppercase tracking-wider text-gray-400 border-b border-gray-100 pb-2">
                 Resumen de Compra
               </h2>
@@ -223,7 +256,7 @@ export default function CheckoutPage() {
               </div>
 
               {error && (
-                <div className="bg-red-50 border border-red-200 text-red-600 text-xs rounded p-2.5 font-medium leading-normal">
+                <div className="bg-red-50 border border-red-200 text-red-600 text-xs rounded-xl p-2.5 font-medium leading-normal">
                   {error}
                 </div>
               )}
@@ -231,7 +264,7 @@ export default function CheckoutPage() {
               <button
                 onClick={handleRealizarPedido}
                 disabled={loading}
-                className="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-sm py-2.5 rounded shadow-sm transition-colors flex items-center justify-center gap-2"
+                className="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-sm py-2.5 rounded-xl shadow-sm transition-colors flex items-center justify-center gap-2"
               >
                 {loading ? (
                   <div className="flex items-center gap-1.5">

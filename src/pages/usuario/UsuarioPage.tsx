@@ -1,324 +1,331 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../../auth/AuthContext';
 
-const API     = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
-const ML_API  = 'https://ml-service-hack.up.railway.app';
+const API = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
+const SUB_PREF_KEY = 'or_sub_prefs';
 
 const STATUS_STEP: Record<string, number> = {
-  'Pendiente': 0, 'Confirmado': 1, 'En preparación': 2, 'En camino': 3, 'Entregado': 4,
+  'Pendiente': 0,
+  'Confirmado': 1,
+  'En preparación': 2,
+  'En camino': 3,
+  'Entregado': 4,
 };
 const STATUS_LABEL: Record<string, string> = {
-  'Pendiente': 'Pedido recibido', 'Confirmado': 'Confirmado',
-  'En preparación': 'Preparando tu pedido', 'En camino': 'Tu pedido está en camino',
-  'Entregado': 'Entregado', 'Cancelado': 'Cancelado',
+  'Pendiente': 'Pedido recibido',
+  'Confirmado': 'Confirmado',
+  'En preparación': 'Preparando tu pedido',
+  'En camino': 'Tu pedido está en camino',
+  'Entregado': 'Entregado',
+  'Cancelado': 'Cancelado',
 };
 const TIMELINE = ['Pendiente', 'Confirmado', 'En preparación', 'En camino', 'Entregado'];
 
-interface OrderItem   { nombre: string; cantidad: number; }
-interface Order       { id_pedido: string; status_final: string; total: number; items: OrderItem[]; }
-interface Notification{ _id: string; leida: boolean; }
-
-interface AltProduct {
-  sku?: string;
-  nombre?: string;
-  affinity_pct?: number;
-  times_accepted?: number;
-  imagen?: string;
+interface OrderItem { sku?: string; nombre?: string; cantidad: number; }
+interface Order {
+  id_pedido: string;
+  status_final: string;
+  total: number;
+  items: OrderItem[];
+  cedis_id?: string;
 }
-interface Suggestion {
-  sku?: string;
+interface Notification { _id: string; leida: boolean; }
+
+interface ReorderPattern {
+  sku: string;
   nombre?: string;
-  cantidad?: string | number;
-  shortage_pct?: number;
-  imagen?: string;
-  sugerido?: AltProduct;
-  alternative?: AltProduct;
+  frecuencia_dias?: number;
+  proximo_pedido?: string;
+  confianza?: number;
 }
 
-/* ── AI Suggestion Card ─────────────────────────────────────────── */
-function AICard({ userId }: { userId: string }) {
-  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
-  const [loading,     setLoading]     = useState(true);
-  const [open,        setOpen]        = useState(false);
-  const [active,      setActive]      = useState(0);         // which suggestion is shown
-  const [tab,         setTab]         = useState<'sugerida' | 'otra'>('sugerida');
-  const [accepted,    setAccepted]    = useState(false);
-  const [declined,    setDeclined]    = useState(false);
+interface StockAlert {
+  sku: string;
+  nombre?: string;
+  dias_restantes?: number;
+  nivel_riesgo?: string;
+  recomendacion?: string;
+}
+
+interface SubstituteSuggestion {
+  sku: string;
+  nombre: string;
+  score: number;
+  razon: string;
+}
+interface SubPref {
+  substitute_sku: string;
+  substitute_nombre: string;
+  saved_at: string;
+}
+
+function loadSubPrefs(): Record<string, SubPref> {
+  try {
+    return JSON.parse(localStorage.getItem(SUB_PREF_KEY) ?? '{}');
+  } catch {
+    return {};
+  }
+}
+
+function saveSubPref(original_sku: string, pref: SubPref) {
+  const prefs = loadSubPrefs();
+  prefs[original_sku] = pref;
+  localStorage.setItem(SUB_PREF_KEY, JSON.stringify(prefs));
+}
+
+function daysUntil(dateStr: string): number {
+  return Math.ceil((new Date(dateStr).getTime() - Date.now()) / 86_400_000);
+}
+
+function ActiveOrderCard({ order, index }: { order: Order; index: number }) {
+  const navigate = useNavigate();
+  const step = STATUS_STEP[order.status_final] ?? 0;
+
+  return (
+    <motion.button
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.06 }}
+      whileHover={{ y: -2 }}
+      whileTap={{ scale: 0.99 }}
+      onClick={() => navigate('/usuario/seguir')}
+      className="w-full bg-gray-50 border border-gray-200 rounded-2xl p-5 text-left shadow-sm hover:border-gray-300 hover:shadow-md transition-all"
+    >
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-[10px] font-bold uppercase tracking-widest text-[#E61A27]">
+          Pedido activo
+        </span>
+        <span className="text-xs font-mono font-semibold bg-[#E61A27] text-white px-2.5 py-0.5 rounded-full">
+          {order.id_pedido}
+        </span>
+      </div>
+      <h2 className="text-lg font-bold text-gray-900 leading-tight">
+        {STATUS_LABEL[order.status_final]}
+      </h2>
+      <p className="text-sm text-gray-500 mt-0.5">
+        {order.items?.length ?? 0} productos · ${order.total?.toLocaleString('es-MX')} MXN
+      </p>
+      <div className="flex gap-1 mt-4">
+        {TIMELINE.map((_, i) => (
+          <div
+            key={i}
+            className={`flex-1 h-1.5 rounded-full transition-all duration-500 ${
+              i <= step ? 'bg-[#E61A27]' : 'bg-gray-200'
+            }`}
+          />
+        ))}
+      </div>
+      <p className="text-xs font-semibold text-[#E61A27] mt-2">Ver seguimiento →</p>
+    </motion.button>
+  );
+}
+
+function SubstitutionSheet({
+  alert,
+  cedisId,
+  customerId,
+  activeOrders,
+  onSaved,
+  onClose,
+}: {
+  alert: StockAlert;
+  cedisId: string;
+  customerId: string;
+  activeOrders: Order[];
+  onSaved: (original_sku: string, pref: SubPref) => void;
+  onClose: () => void;
+}) {
+  const [suggestions, setSuggestions] = useState<SubstituteSuggestion[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState<string | null>(null);
+  const token = localStorage.getItem('or_token');
 
   useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        // trigger generation (fire and forget is fine)
-        fetch(`${ML_API}/suggest/${userId}`, { method: 'POST' }).catch(() => {});
-        // get saved suggestions
-        const res  = await fetch(`${ML_API}/suggest/${userId}`);
-        const data = await res.json();
-        if (cancelled) return;
+    if (!token) return;
+    fetch(`${API}/api/ml/substitution/suggest`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        customer_id: customerId,
+        original_sku: alert.sku,
+        cedis_id: cedisId,
+      }),
+    })
+      .then(r => (r.ok ? r.json() : []))
+      .then(data => setSuggestions(Array.isArray(data) ? data : []))
+      .catch(() => setSuggestions([]))
+      .finally(() => setLoading(false));
+  }, [token, customerId, alert.sku, cedisId]);
 
-        // normalise: could be array or { suggestions: [...] }
-        let list: Suggestion[] = [];
-        if (Array.isArray(data))                 list = data;
-        else if (Array.isArray(data?.suggestions)) list = data.suggestions;
-        else if (data && !data.detail)             list = [data];
-        setSuggestions(list.filter(s => s && (s.sku || s.nombre)));
-      } catch {
-        /* network error → treat as no suggestions */
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+  const handlePick = async (suggestion: SubstituteSuggestion) => {
+    setSaving(suggestion.sku);
+    const pref: SubPref = {
+      substitute_sku: suggestion.sku,
+      substitute_nombre: suggestion.nombre,
+      saved_at: new Date().toISOString(),
+    };
+    saveSubPref(alert.sku, pref);
+
+    if (token) {
+      const ordersWithSku = activeOrders.filter(o =>
+        o.items.some(i => i.sku === alert.sku),
+      );
+      await Promise.all(
+        ordersWithSku.map(o =>
+          fetch(`${API}/api/orders/${o.id_pedido}/substitution`, {
+            method: 'PATCH',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              original_sku: alert.sku,
+              substitute_sku: suggestion.sku,
+              accepted: true,
+            }),
+          }).catch(() => {}),
+        ),
+      );
     }
-    load();
-    return () => { cancelled = true; };
-  }, [userId]);
 
-  const hasAlert = suggestions.length > 0;
-  const current  = suggestions[active] ?? null;
-  const alt      = current?.sugerido ?? current?.alternative ?? null;
+    onSaved(alert.sku, pref);
+    onClose();
+  };
 
-  function openModal(i: number) {
-    setActive(i);
-    setTab('sugerida');
-    setAccepted(false);
-    setDeclined(false);
-    setOpen(true);
-  }
-
-  if (loading) {
-    return <div className="h-16 bg-white rounded-2xl border border-gray-200 animate-pulse" />;
-  }
+  const riskColor: Record<string, string> = {
+    critico: 'text-red-600',
+    alto: 'text-orange-600',
+    medio: 'text-yellow-600',
+  };
+  const risk = alert.nivel_riesgo?.toLowerCase() ?? 'medio';
 
   return (
     <>
-      {/* ── Banner card(s) ── */}
-      {hasAlert ? (
-        suggestions.map((_s, i) => (
-          <motion.button
-            key={i}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            onClick={() => openModal(i)}
-            className="w-full flex items-center gap-3 rounded-2xl border-2 border-red-400 bg-red-50 px-4 py-3.5 text-left shadow-sm"
-          >
-            <div className="w-10 h-10 rounded-xl bg-red-500 flex items-center justify-center shrink-0">
-              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-              </svg>
-            </div>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 0.45 }}
+        exit={{ opacity: 0 }}
+        onClick={onClose}
+        className="fixed inset-0 bg-black z-40"
+      />
+      <motion.div
+        initial={{ y: '100%' }}
+        animate={{ y: 0 }}
+        exit={{ y: '100%' }}
+        transition={{ type: 'tween', duration: 0.26 }}
+        className="fixed bottom-0 left-0 right-0 max-h-[88dvh] bg-white rounded-t-3xl shadow-xl z-50 flex flex-col"
+      >
+        <div className="flex justify-center pt-3 pb-1 shrink-0">
+          <div className="w-10 h-1 bg-gray-200 rounded-full" />
+        </div>
+
+        <div className="px-5 pt-3 pb-4 border-b border-gray-100 shrink-0">
+          <div className="flex items-start justify-between gap-3">
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold text-red-700 leading-tight">Un producto podría agotarse</p>
-              <p className="text-xs text-red-500 mt-0.5">Toca para decidir qué hacer. Es rápido.</p>
+              <p
+                className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${
+                  riskColor[risk] ?? 'text-yellow-600'
+                }`}
+              >
+                Stock bajo ·{' '}
+                {alert.dias_restantes != null
+                  ? `${alert.dias_restantes} días restantes`
+                  : alert.nivel_riesgo}
+              </p>
+              <h2 className="text-base font-bold text-gray-900 leading-snug">
+                Elige un sustituto para
+              </h2>
+              <p className="text-sm text-gray-500 truncate mt-0.5">{alert.nombre ?? alert.sku}</p>
             </div>
-            <svg className="w-4 h-4 text-red-400 shrink-0" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-            </svg>
-          </motion.button>
-        ))
-      ) : (
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex items-center gap-3 rounded-2xl border border-green-200 bg-green-50 px-4 py-3.5"
-        >
-          <div className="w-10 h-10 rounded-xl bg-green-500 flex items-center justify-center shrink-0">
-            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-            </svg>
-          </div>
-          <div>
-            <p className="text-sm font-bold text-green-700">Pedido completo · Todo en orden</p>
-            <p className="text-xs text-green-500 mt-0.5">Todos tus productos están disponibles.</p>
-          </div>
-        </motion.div>
-      )}
-
-      {/* ── Bottom sheet modal ── */}
-      <AnimatePresence>
-        {open && current && (
-          <>
-            {/* Backdrop */}
-            <motion.div
-              key="backdrop"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setOpen(false)}
-              className="fixed inset-0 bg-black/40 z-40"
-            />
-
-            {/* Sheet */}
-            <motion.div
-              key="sheet"
-              initial={{ y: '100%' }}
-              animate={{ y: 0 }}
-              exit={{ y: '100%' }}
-              transition={{ type: 'spring', stiffness: 350, damping: 40 }}
-              className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-3xl shadow-2xl max-h-[90vh] overflow-y-auto"
+            <button
+              onClick={onClose}
+              className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 transition-colors shrink-0 mt-1"
             >
-              {/* Handle */}
-              <div className="flex justify-center pt-3 pb-1">
-                <div className="w-10 h-1 rounded-full bg-gray-200" />
-              </div>
+              <svg
+                className="w-4 h-4 text-gray-500"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
 
-              <div className="px-5 pb-8 pt-2">
-                {/* IA badge */}
-                <div className="flex items-center gap-1.5 mb-4">
-                  <span className="inline-flex items-center gap-1 bg-red-100 text-red-700 text-xs font-bold px-3 py-1 rounded-full">
-                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/>
-                    </svg>
-                    Sugerencia con IA
-                  </span>
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-2">
+          {loading ? (
+            <div className="space-y-2">
+              {[0, 1, 2].map(i => (
+                <div key={i} className="h-16 bg-gray-100 rounded-2xl animate-pulse" />
+              ))}
+            </div>
+          ) : suggestions.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-8">
+              No hay sustitutos disponibles por ahora.
+            </p>
+          ) : (
+            suggestions.map((s, i) => (
+              <motion.button
+                key={s.sku || i}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.05 }}
+                onClick={() => handlePick(s)}
+                disabled={saving !== null}
+                className="w-full flex items-center gap-3 bg-gray-50 border border-gray-100 rounded-2xl p-4 text-left hover:border-[#E61A27]/30 hover:bg-red-50/30 transition-all disabled:opacity-60"
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 truncate">{s.nombre}</p>
+                  <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{s.razon}</p>
                 </div>
-
-                <h2 className="text-xl font-black text-gray-900 leading-tight">
-                  Este producto podría agotarse
-                </h2>
-                <p className="text-sm text-gray-400 mt-1 mb-5">
-                  No cambiamos nada sin preguntarte. Tú decides. 🙂
-                </p>
-
-                {/* Product at risk */}
-                <div className="flex items-center gap-3 bg-gray-50 rounded-2xl p-4 mb-5">
-                  <div className="w-14 h-14 rounded-xl bg-gray-200 flex items-center justify-center shrink-0 overflow-hidden">
-                    {current.imagen ? (
-                      <img src={current.imagen} alt={current.nombre} className="w-full h-full object-cover" />
-                    ) : (
-                      <span className="text-xs text-gray-400 text-center px-1 leading-tight font-medium">
-                        {current.sku ?? '—'}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-bold text-gray-900 text-sm truncate">{current.nombre ?? current.sku ?? 'Producto'}</p>
-                    {current.cantidad != null && (
-                      <p className="text-xs text-gray-400 mt-0.5">{current.cantidad}</p>
-                    )}
-                  </div>
-                  {current.shortage_pct != null && (
-                    <div className="text-right shrink-0">
-                      <p className="text-2xl font-black text-red-600">{current.shortage_pct}%</p>
-                      <p className="text-[10px] text-gray-400">de faltante</p>
-                    </div>
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <span className="text-xs font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded-full tabular-nums">
+                    {Math.round(s.score * 100)}%
+                  </span>
+                  {saving === s.sku ? (
+                    <div className="w-4 h-4 border-2 border-gray-300 border-t-[#E61A27] rounded-full animate-spin" />
+                  ) : (
+                    <svg
+                      className="w-4 h-4 text-gray-300"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
                   )}
                 </div>
+              </motion.button>
+            ))
+          )}
+        </div>
 
-                {/* Tabs */}
-                {alt && (
-                  <>
-                    <div className="flex rounded-xl bg-gray-100 p-1 mb-4 gap-1">
-                      {(['sugerida', 'otra'] as const).map(t => (
-                        <button
-                          key={t}
-                          onClick={() => setTab(t)}
-                          className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${
-                            tab === t ? 'bg-white shadow-sm text-gray-900' : 'text-gray-400'
-                          }`}
-                        >
-                          {t === 'sugerida' ? 'Aceptar sugerida' : 'Elegir otra'}
-                        </button>
-                      ))}
-                    </div>
-
-                    {tab === 'sugerida' && (
-                      <div className="border-2 border-red-400 rounded-2xl p-4 mb-5 flex items-center gap-3">
-                        <div className="w-14 h-14 rounded-xl bg-gray-200 flex items-center justify-center shrink-0 overflow-hidden">
-                          {alt.imagen ? (
-                            <img src={alt.imagen} alt={alt.nombre} className="w-full h-full object-cover" />
-                          ) : (
-                            <span className="text-xs text-gray-400 text-center px-1 leading-tight font-medium">
-                              {alt.sku ?? '—'}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                            <p className="font-bold text-gray-900 text-sm">{alt.nombre ?? alt.sku ?? 'Sustituto'}</p>
-                            <span className="text-[10px] font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded-full shrink-0">
-                              Mejor opción
-                            </span>
-                          </div>
-                          {alt.times_accepted != null && (
-                            <p className="text-xs text-gray-400">Lo aceptaste {alt.times_accepted} veces antes</p>
-                          )}
-                          {alt.affinity_pct != null && (
-                            <div className="mt-2 flex items-center gap-2">
-                              <div className="flex-1 h-1.5 rounded-full bg-gray-200 overflow-hidden">
-                                <div
-                                  className="h-full rounded-full bg-green-500"
-                                  style={{ width: `${alt.affinity_pct}%` }}
-                                />
-                              </div>
-                              <span className="text-[11px] text-gray-400 shrink-0">{alt.affinity_pct}% afín</span>
-                            </div>
-                          )}
-                        </div>
-                        <div className="w-5 h-5 rounded-full border-2 border-red-500 flex items-center justify-center shrink-0">
-                          <div className="w-2.5 h-2.5 rounded-full bg-red-500" />
-                        </div>
-                      </div>
-                    )}
-
-                    {tab === 'otra' && (
-                      <div className="rounded-2xl border border-gray-200 p-4 mb-5 text-center text-sm text-gray-400">
-                        Función disponible próximamente.
-                      </div>
-                    )}
-                  </>
-                )}
-
-                {/* Action buttons */}
-                {accepted ? (
-                  <div className="flex items-center justify-center gap-2 py-4 text-green-600 font-bold">
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                    </svg>
-                    Sustitución aceptada
-                  </div>
-                ) : declined ? (
-                  <div className="flex items-center justify-center gap-2 py-4 text-gray-500 font-semibold">
-                    Registrado. Te reembolsaremos si falta el producto.
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <motion.button
-                      whileTap={{ scale: 0.98 }}
-                      onClick={() => setAccepted(true)}
-                      className="w-full bg-[#E61A27] hover:bg-[#B31217] text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 transition-colors"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                      </svg>
-                      Aceptar esta sustitución
-                    </motion.button>
-                    <motion.button
-                      whileTap={{ scale: 0.98 }}
-                      onClick={() => setDeclined(true)}
-                      className="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold py-4 rounded-2xl transition-colors"
-                    >
-                      No sustituir, mejor reembólsame
-                    </motion.button>
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+        <div className="px-5 pb-8 pt-2 shrink-0">
+          <button
+            onClick={onClose}
+            className="w-full h-11 border border-gray-200 text-gray-600 font-semibold rounded-2xl hover:bg-gray-50 transition-colors text-sm"
+          >
+            Cancelar
+          </button>
+        </div>
+      </motion.div>
     </>
   );
 }
 
-/* ── Quick links ────────────────────────────────────────────────── */
 const quickLinks = [
   {
     path: '/usuario/pedidos',
     label: 'Mis pedidos',
     sub: 'Historial completo',
     icon: (
-      <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
+      />
     ),
     color: 'bg-violet-50 text-violet-600',
   },
@@ -327,34 +334,51 @@ const quickLinks = [
     label: 'Seguimiento',
     sub: '¿Dónde está mi pedido?',
     icon: (
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0M3 7h18M3 7l2-4h14l2 4M3 7v10h1m15 0h1V7" />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0M3 7h18M3 7l2-4h14l2 4M3 7v10h1m15 0h1V7"
+      />
     ),
     color: 'bg-orange-50 text-orange-600',
   },
 ];
 
-/* ── Main page ──────────────────────────────────────────────────── */
 export default function UsuarioPage() {
-  const { user }   = useAuth();
-  const navigate   = useNavigate();
+  const { user } = useAuth();
+  const navigate = useNavigate();
 
-  const [activeOrder, setActiveOrder] = useState<Order | null>(null);
-  const [unread,      setUnread]      = useState(0);
-  const [loading,     setLoading]     = useState(true);
+  const [activeOrders, setActiveOrders] = useState<Order[]>([]);
+  const [lastOrder, setLastOrder] = useState<Order | null>(null);
+  const [unread, setUnread] = useState(0);
+  const [loading, setLoading] = useState(true);
+
+  const [reorderPatterns, setReorderPatterns] = useState<ReorderPattern[]>([]);
+  const [stockAlerts, setStockAlerts] = useState<StockAlert[]>([]);
+  const [subPrefs, setSubPrefs] = useState<Record<string, SubPref>>(loadSubPrefs);
+  const [selectedAlert, setSelectedAlert] = useState<StockAlert | null>(null);
+  const [cedisId, setCedisId] = useState<string | null>(null);
+  const mlFetchedRef = useRef(false);
 
   useEffect(() => {
     const token = localStorage.getItem('or_token');
-    if (!token) { setLoading(false); return; }
-    const h = { Authorization: `Bearer ${token}` };
+    if (!token) {
+      setLoading(false);
+      return;
+    }
 
+    const headers = { Authorization: `Bearer ${token}` };
     Promise.all([
-      fetch(`${API}/api/orders/my`,                              { headers: h }).then(r => r.ok ? r.json() : []),
-      fetch(`${API}/api/notifications?solo_no_leidas=true`,      { headers: h }).then(r => r.ok ? r.json() : []),
+      fetch(`${API}/api/orders/my`, { headers }).then(r => (r.ok ? r.json() : [])),
+      fetch(`${API}/api/notifications`, { headers }).then(r => (r.ok ? r.json() : [])),
     ])
       .then(([orders, notifs]: [Order[], Notification[]]) => {
-        if (Array.isArray(orders) && orders.length > 0) {
-          const active = orders.find(o => !['Entregado', 'Cancelado'].includes(o.status_final));
-          setActiveOrder(active ?? orders[0]);
+        if (Array.isArray(orders)) {
+          const actives = orders.filter(o => !['Entregado', 'Cancelado'].includes(o.status_final));
+          setActiveOrders(actives);
+          if (actives.length === 0 && orders.length > 0) setLastOrder(orders[0]);
+          const cid = orders.find(o => o.cedis_id)?.cedis_id ?? null;
+          setCedisId(cid);
         }
         if (Array.isArray(notifs)) setUnread(notifs.filter(n => !n.leida).length);
       })
@@ -362,15 +386,82 @@ export default function UsuarioPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    if (mlFetchedRef.current || !cedisId || !user?.id) return;
+    mlFetchedRef.current = true;
+
+    const token = localStorage.getItem('or_token');
+    if (!token) return;
+
+    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+    Promise.all([
+      fetch(`${API}/api/ml/reorder-pattern/customer`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ customer_id: user.id }),
+      })
+        .then(r => (r.ok ? r.json() : null))
+        .catch(() => null),
+
+      fetch(`${API}/api/ml/stock-predict/cedis`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ cedis_id: cedisId }),
+      })
+        .then(r => (r.ok ? r.json() : null))
+        .catch(() => null),
+    ]).then(([patterns, stock]) => {
+      const patternList: ReorderPattern[] = Array.isArray(patterns)
+        ? patterns
+        : patterns
+        ? [patterns]
+        : [];
+
+      const upcoming = patternList
+        .filter(p => {
+          const date = p.proximo_pedido;
+          if (!date) return false;
+          const days = daysUntil(date);
+          return days >= -1 && days <= 7 && (p.confianza ?? 1) > 0.4;
+        })
+        .sort((a, b) => daysUntil(a.proximo_pedido!) - daysUntil(b.proximo_pedido!));
+      setReorderPatterns(upcoming);
+
+      const stockList: StockAlert[] = Array.isArray(stock) ? stock : stock ? [stock] : [];
+      const userSkus = new Set(patternList.map(p => p.sku));
+      const alerts = stockList
+        .filter(s => {
+          const risk = s.nivel_riesgo?.toLowerCase() ?? '';
+          const isRisky = ['critico', 'alto', 'medio'].includes(risk);
+          const isRelevant = userSkus.size === 0 || userSkus.has(s.sku);
+          return isRisky && isRelevant;
+        })
+        .sort((a, b) => (a.dias_restantes ?? 99) - (b.dias_restantes ?? 99))
+        .slice(0, 3);
+      setStockAlerts(alerts);
+    });
+  }, [cedisId, user?.id]);
+
   const firstName = user?.nombre?.split(' ')[0] ?? 'Usuario';
-  const step      = activeOrder ? (STATUS_STEP[activeOrder.status_final] ?? 0) : 0;
-  const isActive  = activeOrder && !['Entregado', 'Cancelado'].includes(activeOrder.status_final);
+  const riskBg: Record<string, string> = {
+    critico: 'border-red-200 bg-red-50',
+    alto: 'border-orange-200 bg-orange-50',
+    medio: 'border-yellow-200 bg-yellow-50',
+  };
+  const riskText: Record<string, string> = {
+    critico: 'text-red-700',
+    alto: 'text-orange-700',
+    medio: 'text-yellow-700',
+  };
+  const riskBadge: Record<string, string> = {
+    critico: 'bg-red-100 text-red-700',
+    alto: 'bg-orange-100 text-orange-700',
+    medio: 'bg-yellow-100 text-yellow-700',
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-2xl mx-auto px-4 py-8 space-y-4">
-
-        {/* Greeting */}
         <div className="flex items-start justify-between">
           <div>
             <p className="text-sm text-gray-400 font-medium">Bienvenido de vuelta</p>
@@ -381,62 +472,56 @@ export default function UsuarioPage() {
               onClick={() => navigate('/usuario/perfil')}
               className="relative mt-1 w-10 h-10 bg-white border border-gray-200 rounded-full flex items-center justify-center hover:border-gray-300 transition-colors shadow-sm"
             >
-              <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+              <svg
+                className="w-5 h-5 text-gray-500"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+                />
               </svg>
-              <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-600 text-white text-[10px] font-extrabold rounded-full flex items-center justify-center border-2 border-white tabular-nums">
+              <span className="absolute -top-1 -right-1 w-5 h-5 bg-[#E61A27] text-white text-[10px] font-extrabold rounded-full flex items-center justify-center border-2 border-white tabular-nums">
                 {unread}
               </span>
             </button>
           )}
         </div>
 
-        {/* Active order card */}
         {loading ? (
           <div className="bg-white rounded-2xl border border-gray-100 h-40 animate-pulse" />
-        ) : isActive ? (
-          <motion.button
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            whileHover={{ y: -2 }}
-            whileTap={{ scale: 0.99 }}
-            onClick={() => navigate('/usuario/seguir')}
-            className="w-full bg-[#E61A27] rounded-2xl p-5 text-white shadow-lg text-left"
-          >
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-white/70">Pedido activo</span>
-              <span className="text-xs font-mono font-semibold bg-white/15 px-2.5 py-1 rounded-full">
-                {activeOrder!.id_pedido}
-              </span>
-            </div>
-            <h2 className="text-xl font-bold mt-2">{STATUS_LABEL[activeOrder!.status_final]}</h2>
-            <p className="text-white/75 text-sm mt-1">
-              {activeOrder!.items?.length ?? 0} productos · ${activeOrder!.total?.toLocaleString('es-MX')} MXN
-            </p>
-            <div className="flex gap-1 mt-4">
-              {TIMELINE.map((_, i) => (
-                <div
-                  key={i}
-                  className={`flex-1 h-1.5 rounded-full transition-all duration-500 ${i <= step ? 'bg-white' : 'bg-white/25'}`}
-                />
-              ))}
-            </div>
-            <p className="text-white/60 text-xs mt-2 font-medium">Ver seguimiento →</p>
-          </motion.button>
-        ) : activeOrder ? (
+        ) : activeOrders.length > 0 ? (
+          <div className="space-y-3">
+            {activeOrders.map((order, i) => (
+              <ActiveOrderCard key={order.id_pedido} order={order} index={i} />
+            ))}
+          </div>
+        ) : lastOrder ? (
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             className="bg-white rounded-2xl border border-green-200 p-5 flex items-center gap-4"
           >
             <div className="w-12 h-12 bg-green-50 rounded-xl flex items-center justify-center shrink-0">
-              <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+              <svg
+                className="w-6 h-6 text-green-600"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2.5}
+                viewBox="0 0 24 24"
+              >
                 <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
               </svg>
             </div>
             <div>
               <p className="text-sm font-semibold text-gray-900">Último pedido entregado</p>
-              <p className="text-xs text-gray-400 mt-0.5">{activeOrder.id_pedido} · ${activeOrder.total?.toLocaleString('es-MX')} MXN</p>
+              <p className="text-xs text-gray-400 mt-0.5">
+                {lastOrder.id_pedido} · ${lastOrder.total?.toLocaleString('es-MX')} MXN
+              </p>
             </div>
           </motion.div>
         ) : (
@@ -446,7 +531,13 @@ export default function UsuarioPage() {
             className="bg-white rounded-2xl border border-dashed border-gray-200 p-8 text-center"
           >
             <div className="w-12 h-12 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
-              <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+              <svg
+                className="w-6 h-6 text-gray-400"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.5}
+                viewBox="0 0 24 24"
+              >
                 <path strokeLinecap="round" strokeLinejoin="round" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
               </svg>
             </div>
@@ -455,10 +546,153 @@ export default function UsuarioPage() {
           </motion.div>
         )}
 
-        {/* AI suggestion card — always visible */}
-        {user?.id && <AICard userId={user.id} />}
+        <AnimatePresence>
+          {reorderPatterns.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 flex items-start gap-3"
+            >
+              <div className="w-9 h-9 bg-indigo-100 rounded-xl flex items-center justify-center shrink-0 mt-0.5">
+                <svg
+                  className="w-5 h-5 text-indigo-600"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+                  />
+                </svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-bold text-indigo-700 uppercase tracking-wide mb-0.5">
+                  Sugerencia de pedido
+                </p>
+                <p className="text-sm font-semibold text-indigo-900 leading-snug">
+                  Basado en tu historial, es hora de pedir
+                  {reorderPatterns[0].nombre ? ` ${reorderPatterns[0].nombre}` : ''}
+                  {reorderPatterns[0].proximo_pedido
+                    ? ` ${daysUntil(reorderPatterns[0].proximo_pedido) <= 0
+                        ? 'hoy'
+                        : daysUntil(reorderPatterns[0].proximo_pedido) === 1
+                        ? 'mañana'
+                        : `en ${daysUntil(reorderPatterns[0].proximo_pedido)} días`}`
+                    : ''}
+                  .
+                </p>
+                {reorderPatterns.length > 1 && (
+                  <p className="text-xs text-indigo-500 mt-0.5">
+                    +{reorderPatterns.length - 1} producto
+                    {reorderPatterns.length > 2 ? 's' : ''} más
+                  </p>
+                )}
+                <button
+                  onClick={() => navigate('/usuario/tienda')}
+                  className="mt-2 text-xs font-bold text-indigo-700 hover:text-indigo-900 transition-colors"
+                >
+                  Hacer pedido ahora →
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-        {/* CTA */}
+        <AnimatePresence>
+          {stockAlerts.length > 0 && (
+            <motion.div className="space-y-2">
+              {stockAlerts.map((alert, i) => {
+                const risk = alert.nivel_riesgo?.toLowerCase() ?? 'medio';
+                const existingPref = subPrefs[alert.sku];
+                return (
+                  <motion.div
+                    key={alert.sku}
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.05 }}
+                    className={`border rounded-2xl p-4 flex items-start gap-3 ${
+                      riskBg[risk] ?? 'border-yellow-200 bg-yellow-50'
+                    }`}
+                  >
+                    <div
+                      className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
+                        riskBadge[risk] ?? 'bg-yellow-100 text-yellow-700'
+                      }`}
+                    >
+                      <svg
+                        className="w-5 h-5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77 1.333-2.694 1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                        />
+                      </svg>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p
+                        className={`text-xs font-bold uppercase tracking-wide mb-0.5 ${
+                          riskText[risk] ?? 'text-yellow-700'
+                        }`}
+                      >
+                        Posible falta de stock
+                      </p>
+                      <p className="text-sm font-semibold text-gray-900 leading-snug truncate">
+                        {alert.nombre ?? alert.sku}
+                      </p>
+                      {alert.dias_restantes != null && (
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          Stock estimado: ~{alert.dias_restantes} día
+                          {alert.dias_restantes !== 1 ? 's' : ''}
+                        </p>
+                      )}
+                      {existingPref ? (
+                        <div className="flex items-center gap-1.5 mt-2">
+                          <svg
+                            className="w-3.5 h-3.5 text-green-600"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth={2.5}
+                            viewBox="0 0 24 24"
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                          <p className="text-xs text-green-700 font-semibold">
+                            Sustituto: {existingPref.substitute_nombre}
+                          </p>
+                          <button
+                            onClick={() => setSelectedAlert(alert)}
+                            className="text-xs text-gray-400 hover:text-gray-600 underline ml-1"
+                          >
+                            cambiar
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setSelectedAlert(alert)}
+                          className={`mt-2 text-xs font-bold ${
+                            riskText[risk] ?? 'text-yellow-700'
+                          } hover:opacity-80 transition-opacity`}
+                        >
+                          Elegir sustituto →
+                        </button>
+                      )}
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <motion.button
           whileHover={{ y: -1 }}
           whileTap={{ scale: 0.99 }}
@@ -471,7 +705,6 @@ export default function UsuarioPage() {
           Hacer un pedido
         </motion.button>
 
-        {/* Quick links */}
         <div className="grid grid-cols-2 gap-3">
           {quickLinks.map(item => (
             <motion.button
@@ -492,6 +725,19 @@ export default function UsuarioPage() {
           ))}
         </div>
       </div>
+
+      <AnimatePresence>
+        {selectedAlert && cedisId && user?.id && (
+          <SubstitutionSheet
+            alert={selectedAlert}
+            cedisId={cedisId}
+            customerId={user.id}
+            activeOrders={activeOrders}
+            onSaved={(sku, pref) => setSubPrefs(prev => ({ ...prev, [sku]: pref }))}
+            onClose={() => setSelectedAlert(null)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
