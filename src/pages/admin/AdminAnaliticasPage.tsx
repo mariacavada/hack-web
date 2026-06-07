@@ -1,16 +1,17 @@
 import { useEffect, useState } from 'react';
 import {
-  PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
+  PieChart, Pie, Tooltip, Legend, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
   LineChart, Line,
 } from 'recharts';
 
 const API = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
 
-const COLORS = ['#E61A27', '#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899', '#14B8A6', '#F97316'];
+const COLORS = ['#E61A27', '#F87171', '#FCA5A5', '#FBBFCA', '#FB923C', '#F59E0B', '#8B5CF6', '#EC4899'];
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
 interface AnyOrder {
+  _id: string;
   status_final: string;
   items?: { nombre?: string; cantidad?: number }[];
   createdAt?: string;
@@ -22,8 +23,13 @@ interface RiskItem {
   sku: string;
   nombre?: string;
   probabilidad?: number;
+  confianza?: number;
   horas_estimadas?: number;
+  dias_estimados_agotamiento?: number;
   nivel?: string;
+  nivel_alerta?: string;
+  stock_actual?: number;
+  cantidad_reorden_sugerida?: number;
 }
 
 interface LowStockItem {
@@ -55,14 +61,46 @@ export default function AdminAnaliticasPage() {
 
   useEffect(() => {
     Promise.all([
-      fetch(`${API}/api/admin/orders`,                                      { headers: h }).then(r => r.ok ? r.json() : []),
-      fetch(`${API}/api/admin/inventory/depletion-risk?nivel=critico`,      { headers: h }).then(r => r.ok ? r.json() : []),
-      fetch(`${API}/api/admin/inventory/low-stock?cedis_id=3012`,           { headers: h }).then(r => r.ok ? r.json() : []),
+      fetch(`${API}/api/admin/orders`,                                 { headers: h }).then(r => r.ok ? r.json() : []),
+      fetch(`${API}/api/admin/inventory/depletion-risk`, { headers: h }).then(r => r.ok ? r.json() : []),
+      fetch(`${API}/api/admin/inventory/low-stock`,     { headers: h }).then(r => r.ok ? r.json() : []),
     ])
-      .then(([o, ri, ls]) => {
-        setOrders(Array.isArray(o) ? o : o?.orders ?? []);
-        setRisk(Array.isArray(ri) ? ri : ri?.items ?? []);
-        setLowStock(Array.isArray(ls) ? ls : ls?.items ?? []);
+      .then(async ([o, ri, ls]) => {
+        const rawOrders: AnyOrder[] = Array.isArray(o) ? o : o?.orders ?? [];
+        const riskArr = Array.isArray(ri) ? ri : ri?.items ?? ri?.predictions ?? [];
+        const lsArr   = Array.isArray(ls) ? ls : ls?.items ?? [];
+        console.log('[depletion-risk]', ri, '→', riskArr);
+        console.log('[low-stock]',      ls, '→', lsArr);
+        if (riskArr[0]) console.log('[risk-item-0]', JSON.stringify(riskArr[0]));
+        setRisk(riskArr);
+        setLowStock(lsArr);
+
+        // Fetch detalles for up to 20 orders to build product sales pie chart
+        const sample = rawOrders.slice(0, 20);
+        const details = await Promise.all(
+          sample.map(order =>
+            fetch(`${API}/api/admin/orders/${order._id}`, { headers: h })
+              .then(r => r.ok ? r.json() : null)
+              .catch(() => null)
+          )
+        );
+
+        const enriched: AnyOrder[] = rawOrders.map(order => {
+          const detail = details.find(d =>
+            (d?.order?._id ?? d?._id) === order._id
+          );
+          if (!detail) return order;
+          const detalles: any[] = detail.detalles ?? detail.items ?? [];
+          return {
+            ...order,
+            items: detalles.map((it: any) => ({
+              nombre:   it.nombre_sku_solicitado ?? it.nombre ?? it.sku ?? 'Producto',
+              cantidad: it.cantidad ?? it.cantidad_solicitada ?? 1,
+            })),
+          };
+        });
+
+        setOrders(enriched);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -79,10 +117,16 @@ export default function AdminAnaliticasPage() {
         counts[name] = (counts[name] ?? 0) + (item.cantidad ?? 1);
       });
     });
-    return Object.entries(counts)
+    const entries = Object.entries(counts)
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 8);
+    const total = entries.reduce((s, e) => s + e.value, 0);
+    return entries.map((e, idx) => ({
+      ...e,
+      pct:  total > 0 ? +((e.value / total) * 100).toFixed(1) : 0,
+      fill: COLORS[idx % COLORS.length],
+    }));
   })();
 
   // 2. Eficiencia de ruta (bar por estado)
@@ -92,7 +136,7 @@ export default function AdminAnaliticasPage() {
     return Object.entries(counts).map(([name, value]) => ({ name, value }));
   })();
   const totalOrders = orders.length;
-  const delivered   = orders.filter(o => o.status_final === 'Entregado').length;
+  const delivered   = orders.filter(o => o.status_final?.toLowerCase() === 'entregado').length;
   const efficiency  = totalOrders > 0 ? Math.round((delivered / totalOrders) * 100) : 0;
 
   // 3. Tiempo de entrega — pedidos por día (últimos 14 días)
@@ -109,22 +153,32 @@ export default function AdminAnaliticasPage() {
       .slice(-14);
   })();
 
-  // 4. Stock predictivo — horas hasta agotamiento
+  // 4. Stock predictivo — días hasta agotamiento
   const stockRisk = risk
-    .filter(r => r.horas_estimadas != null)
     .map(r => ({
-      name: (r.nombre ?? r.sku).slice(0, 20),
-      horas: r.horas_estimadas!,
-      prob:  r.probabilidad ?? 0,
+      name:  (r.nombre ?? r.sku).slice(0, 20),
+      dias:  r.dias_estimados_agotamiento ?? (r.horas_estimadas != null ? +(r.horas_estimadas / 24).toFixed(1) : 0),
+      nivel: (r.nivel_alerta ?? r.nivel ?? '').toLowerCase(),
     }))
-    .sort((a, b) => a.horas - b.horas)
+    .sort((a, b) => a.dias - b.dias)
     .slice(0, 8);
 
-  const lowStockChart = lowStock
+  // Usa low-stock endpoint; si está vacío, cae en depletion-risk items
+  const lowStockSource: { sku: string; nombre?: string; stock_actual?: number; stock_minimo?: number }[] =
+    lowStock.length > 0
+      ? lowStock
+      : risk.map(r => ({
+          sku:         r.sku,
+          nombre:      r.nombre,
+          stock_actual: r.stock_actual ?? 0,
+          stock_minimo: r.cantidad_reorden_sugerida ?? 0,
+        }));
+
+  const lowStockChart = lowStockSource
     .map(ls => ({
-      name:    (ls.nombre ?? ls.sku).slice(0, 20),
-      actual:  ls.stock_actual  ?? 0,
-      minimo:  ls.stock_minimo  ?? 0,
+      name:   (ls.nombre ?? ls.sku).slice(0, 20),
+      actual: ls.stock_actual ?? 0,
+      minimo: ls.stock_minimo ?? 0,
     }))
     .slice(0, 8);
 
@@ -178,14 +232,15 @@ export default function AdminAnaliticasPage() {
                   outerRadius={100}
                   paddingAngle={3}
                   dataKey="value"
-                >
-                  {productSales.map((_, i) => (
-                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                  ))}
-                </Pie>
+                />
                 <Tooltip
-  formatter={(value, name) => [`${value} uds.`, name]}
-/>
+                  formatter={(value: any, name: any) => {
+                    const total = productSales.reduce((s, p) => s + p.value, 0);
+                    const pct = total > 0 ? ((value / total) * 100).toFixed(1) : '0';
+                    return [`${pct}%`, name];
+                  }}
+                  contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }}
+                />
                 <Legend
                   formatter={(value) => <span style={{ fontSize: 11, color: '#6b7280' }}>{value}</span>}
                 />
@@ -229,20 +284,21 @@ export default function AdminAnaliticasPage() {
                   <Tooltip
                     contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }}
                   />
-                  <Bar dataKey="value" name="Pedidos" radius={[0, 4, 4, 0]}>
-                    {statusData.map((entry, i) => (
-                      <Cell
-                        key={i}
-                        fill={
-                          entry.name === 'Entregado'       ? '#10B981' :
-                          entry.name === 'En camino'       ? '#F97316' :
-                          entry.name === 'Pendiente'       ? '#F59E0B' :
-                          entry.name === 'Cancelado'       ? '#EF4444' :
-                                                             '#3B82F6'
-                        }
-                      />
-                    ))}
-                  </Bar>
+                  <Bar
+                    dataKey="value"
+                    name="Pedidos"
+                    radius={[0, 4, 4, 0]}
+                    shape={(props: any) => {
+                      const { x, y, width, height, name } = props;
+                      const fill =
+                        ['entregado','Entregado'].includes(name)              ? '#10B981' :
+                        ['en camino','En camino','en_camino'].includes(name)  ? '#F97316' :
+                        ['pendiente','Pendiente'].includes(name)              ? '#F59E0B' :
+                        ['cancelado','Cancelado'].includes(name)              ? '#EF4444' :
+                                                                                '#FBBFCA';
+                      return <rect x={x} y={y} width={width} height={height} rx={4} ry={4} fill={fill} />;
+                    }}
+                  />
                 </BarChart>
               </ResponsiveContainer>
             </>
@@ -261,9 +317,10 @@ export default function AdminAnaliticasPage() {
               <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
               <XAxis dataKey="fecha" tick={{ fontSize: 11 }} />
               <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-             <Tooltip
-  formatter={(v) => [`${v} pedidos`, 'Pedidos']}
-/>
+              <Tooltip
+                contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }}
+                formatter={(v: any) => [`${v} pedidos`, 'Pedidos']}
+              />
               <Line
                 type="monotone"
                 dataKey="pedidos"
@@ -280,9 +337,9 @@ export default function AdminAnaliticasPage() {
       {/* Row 3: Stock predictivo */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-        {/* Horas hasta agotamiento */}
+        {/* Días hasta agotamiento */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-          {sectionTitle('Stock predictivo — cuándo se acaba', 'Horas estimadas hasta agotamiento crítico')}
+          {sectionTitle('Stock predictivo — cuándo se acaba', 'Días estimados hasta agotamiento por SKU')}
           {stockRisk.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-10">Sin productos en riesgo crítico</p>
           ) : (
@@ -292,29 +349,34 @@ export default function AdminAnaliticasPage() {
                 <XAxis
                   type="number"
                   tick={{ fontSize: 11 }}
-                  label={{ value: 'horas restantes', position: 'insideBottomRight', offset: -5, fontSize: 10, fill: '#9ca3af' }}
+                  label={{ value: 'días restantes', position: 'insideBottomRight', offset: -5, fontSize: 10, fill: '#9ca3af' }}
                 />
-                <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={100} />
-               <Tooltip
-  formatter={(v) => [`${v}h`, 'Horas restantes']}
-/>
-                <Bar dataKey="horas" name="Horas restantes" radius={[0, 4, 4, 0]}>
-                  {stockRisk.map((entry, i) => (
-                    <Cell
-                      key={i}
-                      fill={entry.horas < 12 ? '#EF4444' : entry.horas < 24 ? '#F97316' : '#F59E0B'}
-                    />
-                  ))}
-                </Bar>
+                <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={120} />
+                <Tooltip
+                  contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }}
+                  formatter={(v: any) => [v === 0 ? 'Agotado' : `${v} días`, 'Días restantes']}
+                />
+                <Bar
+                  dataKey="dias"
+                  name="Días restantes"
+                  radius={[0, 4, 4, 0]}
+                  minPointSize={6}
+                  shape={(props: any) => {
+                    const { x, y, width, height, dias } = props;
+                    const fill = dias === 0 ? '#EF4444' : dias < 3 ? '#F97316' : dias < 7 ? '#F59E0B' : '#10B981';
+                    return <rect x={x} y={y} width={Math.max(width, 6)} height={height} rx={4} ry={4} fill={fill} />;
+                  }}
+                />
               </BarChart>
             </ResponsiveContainer>
           )}
 
           {/* Leyenda de colores */}
           <div className="flex gap-4 mt-3 text-xs text-gray-500">
-            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block" /> &lt;12h crítico</span>
-            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-orange-500 inline-block" /> &lt;24h urgente</span>
-            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-yellow-500 inline-block" /> &lt;48h alerta</span>
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block" /> Agotado</span>
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-orange-500 inline-block" /> &lt;3 días</span>
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-yellow-500 inline-block" /> &lt;7 días</span>
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-green-500 inline-block" /> 7+ días</span>
           </div>
         </div>
 
@@ -333,7 +395,7 @@ export default function AdminAnaliticasPage() {
                   contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }}
                 />
                 <Legend formatter={(v) => <span style={{ fontSize: 11, color: '#6b7280' }}>{v === 'actual' ? 'Stock actual' : 'Stock mínimo'}</span>} />
-                <Bar dataKey="actual" name="actual" fill="#3B82F6" radius={[0, 4, 4, 0]} />
+                <Bar dataKey="actual" name="actual" fill="#FCA5A5" radius={[0, 4, 4, 0]} />
                 <Bar dataKey="minimo" name="minimo" fill="#E5E7EB" radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
