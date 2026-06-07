@@ -35,8 +35,7 @@ const ROUTE_STATUS_LABEL: Record<string, { label: string; color: string }> = {
   faltante:   { label: 'Faltante',         color: 'bg-red-100 text-red-700' },
   salio:      { label: 'Salió del CEDIS',  color: 'bg-orange-100 text-orange-700' },
   en_camino:  { label: 'En camino',        color: 'bg-orange-100 text-orange-700' },
-  entregado:  { label: 'Entregado',        color: 'bg-green-100 text-green-700' },
-  finalizado: { label: 'Finalizado',       color: 'bg-green-100 text-green-700' },
+  entregado:  { label: 'Finalizado',       color: 'bg-green-100 text-green-700' },
   cancelado:  { label: 'Cancelado',        color: 'bg-gray-100 text-gray-500' },
 };
 
@@ -47,6 +46,76 @@ const INCIDENT_TYPES = [
   { key: 'direccion_incorrecta', label: 'Dirección incorrecta' },
   { key: 'otro',                 label: 'Otro' },
 ];
+
+function OrderCalendar({
+  selected, month, orderDateSet, onChange, onMonthChange,
+}: {
+  selected: Date; month: Date; orderDateSet: Set<string>;
+  onChange: (d: Date) => void; onMonthChange: (d: Date) => void;
+}) {
+  const todayMidnight = useMemo(() => { const d = new Date(); d.setHours(0,0,0,0); return d; }, []);
+  const todayStr    = todayMidnight.toDateString();
+  const selectedStr = selected.toDateString();
+  const yr = month.getFullYear();
+  const mo = month.getMonth();
+  const startOffset = (new Date(yr, mo, 1).getDay() + 6) % 7;
+  const daysInMonth = new Date(yr, mo + 1, 0).getDate();
+  const cells: (number | null)[] = [
+    ...Array(startOffset).fill(null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ];
+  const monthLabel = month.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
+      <div className="flex items-center justify-between mb-3">
+        <button onClick={() => onMonthChange(new Date(yr, mo - 1, 1))}
+          className="w-7 h-7 flex items-center justify-center rounded-xl hover:bg-gray-100 transition-colors">
+          <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+        <span className="text-sm font-semibold text-gray-900 capitalize">{monthLabel}</span>
+        <button onClick={() => onMonthChange(new Date(yr, mo + 1, 1))}
+          className="w-7 h-7 flex items-center justify-center rounded-xl hover:bg-gray-100 transition-colors">
+          <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+      </div>
+      <div className="grid grid-cols-7 mb-1">
+        {['L','M','X','J','V','S','D'].map(d => (
+          <div key={d} className="text-center text-[10px] font-bold text-gray-400 py-1">{d}</div>
+        ))}
+      </div>
+      <div className="grid grid-cols-7 gap-y-0.5">
+        {cells.map((day, i) => {
+          if (!day) return <div key={`e-${i}`} />;
+          const date    = new Date(yr, mo, day);
+          const dateStr = date.toDateString();
+          const isPast  = date < todayMidnight;
+          const isTdy   = dateStr === todayStr;
+          const isSel   = dateStr === selectedStr;
+          const hasDot  = orderDateSet.has(dateStr);
+          return (
+            <button key={dateStr} onClick={() => !isPast && onChange(date)}
+              className={`relative flex flex-col items-center justify-center h-9 rounded-xl text-sm font-medium transition-all
+                ${isSel   ? 'bg-[#E61A27] text-white shadow-sm'
+                : isTdy   ? 'ring-1 ring-[#E61A27] text-[#E61A27]'
+                : isPast  ? 'text-gray-300 cursor-default'
+                :           'text-gray-700 hover:bg-gray-100'}`}>
+              {day}
+              {hasDot && (
+                <span className={`absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full
+                  ${isSel ? 'bg-white/70' : isPast ? 'bg-gray-200' : 'bg-[#E61A27]'}`} />
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 export default function RepartidorPage() {
   const location = useLocation();
@@ -83,8 +152,9 @@ export default function RepartidorPage() {
 
   const [showMissingForm, setShowMissingForm] = useState(false);
   const [missingNotes,    setMissingNotes]    = useState('');
-  const [showFutureStops, setShowFutureStops] = useState(false);
-  const [futureDays,      setFutureDays]      = useState<number>(3);
+  const [selectedDate,    setSelectedDate]    = useState<Date>(() => { const d = new Date(); d.setHours(0,0,0,0); return d; });
+  const [calMonth,        setCalMonth]        = useState<Date>(() => { const d = new Date(); d.setDate(1); d.setHours(0,0,0,0); return d; });
+  const [routeDay,        setRouteDay]        = useState<'hoy' | 'manana'>('hoy');
 
   const token = localStorage.getItem('or_token') ?? '';
   const h     = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
@@ -155,36 +225,46 @@ export default function RepartidorPage() {
 
   const todayOrders = useMemo(() => orders.filter(isToday), [orders]);
 
-  const futureStops = useMemo(() => {
-    if (!orders.length) return [] as RouteStop[];
-    const routeIds = new Set(
-      (route?.stops ?? []).map(s => s.id_pedido ?? s.order_id).filter(Boolean)
-    );
-    const now = new Date();
-    const end = new Date();
-    end.setDate(now.getDate() + Math.max(1, futureDays));
+  const selectedDateOrders = useMemo(() => {
+    const sel = selectedDate.toDateString();
+    return orders.filter(o => {
+      const d = o.fecha_entrega ?? o.assigned_at ?? o.fecha_pedido;
+      return !!d && new Date(d).toDateString() === sel;
+    });
+  }, [orders, selectedDate]);
 
-    return orders
-      .filter(o => {
-        if (['Entregado', 'Cancelado'].includes(o.status_final)) return false;
-        if (routeIds.has(o.id_pedido)) return false;
-        const dateStr = o.eta_entrega ?? o.fecha_entrega ?? o.fecha_pedido;
-        if (!dateStr) return true;
-        const d = new Date(dateStr);
-        return d > now && d <= end;
-      })
-      .map<RouteStop>(o => ({
-        order_id:    o._id,
-        id_pedido:   o.id_pedido,
-        cliente:     o.cliente ?? o.usuario?.nombre ?? '',
-        direccion:   o.direccion_entrega ?? '',
-        stop_number: undefined,
-        status:      o.status_final,
-        eta:         o.eta_entrega ?? o.fecha_entrega ?? o.fecha_pedido,
-        lat:         o.lat,
-        lng:         o.lng,
-      }));
-  }, [orders, futureDays, route?.stops]);
+  const orderDateSet = useMemo(() => {
+    const s = new Set<string>();
+    for (const o of orders) {
+      const d = o.fecha_entrega ?? o.assigned_at ?? o.fecha_pedido;
+      if (d) s.add(new Date(d).toDateString());
+    }
+    return s;
+  }, [orders]);
+
+  const tomorrowStr = useMemo(() => {
+    const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(0,0,0,0);
+    return d.toDateString();
+  }, []);
+
+  const tomorrowOrders = useMemo(() =>
+    orders.filter(o => {
+      const d = o.fecha_entrega ?? o.assigned_at ?? o.fecha_pedido;
+      return !!d && new Date(d).toDateString() === tomorrowStr;
+    }), [orders, tomorrowStr]);
+
+  const tomorrowStops = useMemo<RouteStop[]>(() =>
+    tomorrowOrders.map((o, idx) => ({
+      order_id:    o._id,
+      id_pedido:   o.id_pedido,
+      cliente:     o.cliente ?? o.usuario?.nombre ?? '',
+      direccion:   o.direccion_entrega ?? '',
+      stop_number: idx + 1,
+      status:      o.status_final,
+      eta:         o.eta_entrega ?? o.fecha_entrega ?? o.fecha_pedido,
+      lat:         o.lat,
+      lng:         o.lng,
+    })), [tomorrowOrders]);
 
   const orderStops = useMemo<RouteStop[]>(() =>
     todayOrders.map((o, idx) => ({
@@ -219,29 +299,23 @@ export default function RepartidorPage() {
     return result;
   }, [route?.stops, orders]);
 
-  const mergedStops = useMemo(() => {
-    const base = syncedRouteStops;
-    return showFutureStops ? [...base, ...futureStops] : base;
-  }, [syncedRouteStops, showFutureStops, futureStops]);
-
   const effectiveStops = useMemo(
-    () => mergedStops.length > 0 ? mergedStops : orderStops,
-    [mergedStops, orderStops],
+    () => syncedRouteStops.length > 0 ? syncedRouteStops : orderStops,
+    [syncedRouteStops, orderStops],
   );
 
   // ── Route finalization ────────────────────────────────────────────────────
   const TERMINAL_STATUSES = new Set(['Entregado', 'Incompleto', 'Cancelado']);
 
-  const checkAndFinalizeRoute = (updatedId: string, updatedStatus: string) => {
+  useEffect(() => {
+    if (!route) return;
     const todayList = orders.filter(isToday);
     if (todayList.length === 0) return;
-    const allDone = todayList.every(o =>
-      o._id === updatedId
-        ? TERMINAL_STATUSES.has(updatedStatus)
-        : TERMINAL_STATUSES.has(o.status_final)
-    );
-    if (allDone) setRoute(r => r ? { ...r, current_status: 'finalizado' } : r);
-  };
+    if (todayList.every(o => TERMINAL_STATUSES.has(o.status_final))) {
+      setRoute(r => r ? { ...r, current_status: 'entregado' } : r);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orders, route?._id]);
 
   // ── Status update ─────────────────────────────────────────────────────────
   const updateOrderStatus = async (
@@ -269,7 +343,6 @@ export default function RepartidorPage() {
           : normalizeStatus(status);
 
         ctxUpdateStatus(order._id, confirmed);
-        checkAndFinalizeRoute(order._id, confirmed);
 
         // Background sync: confirm the DB reflects what we just set
         refreshSilent();
@@ -340,7 +413,6 @@ export default function RepartidorPage() {
           });
           if (statusRes.ok || statusRes.status >= 500) {
             ctxUpdateStatus(matchingOrder._id, 'Entregado');
-            checkAndFinalizeRoute(matchingOrder._id, 'Entregado');
             refreshSilent();
           }
         }
@@ -403,7 +475,6 @@ export default function RepartidorPage() {
         });
         if (statusRes.ok || statusRes.status >= 500) {
           ctxUpdateStatus(incidentOrder, 'Incompleto');
-          checkAndFinalizeRoute(incidentOrder, 'Incompleto');
           refreshSilent();
         }
       }
@@ -442,17 +513,25 @@ export default function RepartidorPage() {
             </div>
           )}
 
-          {todayOrders.length === 0 ? (
+          <OrderCalendar
+            selected={selectedDate}
+            month={calMonth}
+            orderDateSet={orderDateSet}
+            onChange={d => setSelectedDate(d)}
+            onMonthChange={d => setCalMonth(d)}
+          />
+
+          {selectedDateOrders.length === 0 ? (
             <div className="bg-white rounded-2xl border border-dashed border-gray-200 p-12 text-center">
               <div className="w-12 h-12 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
                 <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                 </svg>
               </div>
-              <p className="text-gray-900 font-semibold text-sm">Sin pedidos para hoy</p>
-              <p className="text-gray-400 text-xs mt-1">Los pedidos aparecerán aquí cuando sean asignados.</p>
+              <p className="text-gray-900 font-semibold text-sm">Sin pedidos para este día</p>
+              <p className="text-gray-400 text-xs mt-1">No hay entregas asignadas para la fecha seleccionada.</p>
             </div>
-          ) : todayOrders.map(o => {
+          ) : selectedDateOrders.map(o => {
             const address    = o.direccion_entrega ?? o.usuario?.direccion;
             const isUpdating = updatingId === o._id;
             const canDeliver = isToday(o);
@@ -574,124 +653,195 @@ export default function RepartidorPage() {
       {activeTab === 'ruta' && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
 
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={showFutureStops} onChange={e => setShowFutureStops(e.target.checked)} className="w-4 h-4" />
-                <span className="text-sm text-gray-600">Incluir pedidos futuros</span>
-              </label>
-              {showFutureStops && (
-                <select value={String(futureDays)} onChange={e => setFutureDays(Number(e.target.value))} className="text-sm border border-gray-200 rounded-md px-2 py-1">
-                  <option value="1">1 día</option>
-                  <option value="3">3 días</option>
-                  <option value="7">7 días</option>
-                </select>
+          {/* Hoy / Mañana toggle */}
+          <div className="flex bg-gray-100 rounded-2xl p-1 gap-1">
+            <button onClick={() => setRouteDay('hoy')}
+              className={`flex-1 h-9 rounded-xl text-sm font-semibold transition-all ${routeDay === 'hoy' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              Hoy
+            </button>
+            <button onClick={() => setRouteDay('manana')}
+              className={`flex-1 h-9 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-1.5 ${routeDay === 'manana' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              Mañana
+              {tomorrowOrders.length > 0 && (
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${routeDay === 'manana' ? 'bg-[#E61A27] text-white' : 'bg-gray-300 text-gray-600'}`}>
+                  {tomorrowOrders.length}
+                </span>
               )}
-            </div>
-            <div className="text-xs text-gray-400">Mostrando {effectiveStops.length} paradas</div>
+            </button>
           </div>
 
-          <RouteMap
-            stops={effectiveStops}
-            cedis={cedisLocation}
-            canComplete={['salio', 'en_camino'].includes(routeStatus)}
-            completingStop={completingStop}
-            onCompleteStop={handleCompleteStop}
-            onMissingStop={(_, orderId) => {
-              setActiveTab('incidencias');
-              if (orderId) setIncidentOrder(orderId);
-              setIncidentType('producto_faltante');
-            }}
-          />
+          {routeDay === 'hoy' ? (
+            <div className="space-y-4">
+              
 
-          {!route ? (
-            <div className="bg-white rounded-2xl border border-dashed border-gray-200 p-10 text-center space-y-4">
-              <div className="w-12 h-12 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto">
-                <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-                </svg>
-              </div>
-              <div>
-                <p className="text-gray-900 font-semibold text-sm">Sin ruta activa</p>
-                <p className="text-gray-400 text-xs mt-1">Inicia tu ruta del día para ver las paradas optimizadas.</p>
-              </div>
-              <button
-                onClick={startRoute}
-                disabled={routeActionLoading}
-                className="bg-[#E61A27] text-white text-sm font-bold px-6 py-3 rounded-xl hover:bg-[#B31217] disabled:opacity-60 transition-colors flex items-center gap-2 mx-auto"
-              >
-                {routeActionLoading
-                  ? <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                  : null}
-                Iniciar ruta del día
-              </button>
-            </div>
-          ) : (
-            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-base font-bold text-gray-900">Estado de la ruta</h2>
-                {routeStatusMeta && (
-                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${routeStatusMeta.color}`}>
-                    {routeStatusMeta.label}
-                  </span>
-                )}
-              </div>
+              <RouteMap
+                stops={effectiveStops}
+                cedis={cedisLocation}
+                canComplete={['salio', 'en_camino'].includes(routeStatus)}
+                completingStop={completingStop}
+                onCompleteStop={handleCompleteStop}
+                onMissingStop={(_, orderId) => {
+                  setActiveTab('incidencias');
+                  if (orderId) setIncidentOrder(orderId);
+                  setIncidentType('producto_faltante');
+                }}
+              />
 
-              {routeStatus === 'programado' && (
-                <button onClick={handleLoad} disabled={routeActionLoading}
-                  className="w-full h-14 rounded-xl bg-yellow-500 hover:bg-yellow-600 disabled:opacity-60 text-white font-bold text-base transition-colors flex items-center justify-center gap-2 shadow-sm">
-                  {routeActionLoading
-                    ? <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                    : <><svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" /></svg>Comenzar carga del camión</>}
-                </button>
-              )}
-
-              {routeStatus === 'cargando' && (
-                <div className="space-y-2">
-                  <button onClick={handleDepart} disabled={routeActionLoading}
-                    className="w-full h-14 rounded-xl bg-[#E61A27] hover:bg-[#B31217] disabled:opacity-60 text-white font-bold text-base transition-colors flex items-center justify-center gap-2 shadow-sm">
-                    {routeActionLoading
-                      ? <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                      : <><svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0M3 7h18M3 7l2-4h14l2 4M3 7v10h1m15 0h1V7" /></svg>Salir del CEDIS</>}
-                  </button>
-                  <button onClick={() => setShowMissingForm(v => !v)}
-                    className="w-full h-11 rounded-xl border border-red-200 text-sm font-medium text-red-500 hover:bg-red-50 transition-colors">
-                    Reportar pedido faltante en carga
-                  </button>
-                </div>
-              )}
-
-              {(routeStatus === 'finalizado' || routeStatus === 'entregado') && (
-                <div className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-xl px-4 py-4">
-                  <div className="w-9 h-9 bg-green-100 rounded-xl flex items-center justify-center shrink-0">
-                    <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              {!route ? (
+                <div className="bg-white rounded-2xl border border-dashed border-gray-200 p-10 text-center space-y-4">
+                  <div className="w-12 h-12 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto">
+                    <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
                     </svg>
                   </div>
                   <div>
-                    <p className="text-sm font-bold text-green-800">Ruta finalizada</p>
-                    <p className="text-xs text-green-600 mt-0.5">Todos los pedidos del día han sido procesados.</p>
+                    <p className="text-gray-900 font-semibold text-sm">Sin ruta activa</p>
+                    <p className="text-gray-400 text-xs mt-1">Inicia tu ruta del día para ver las paradas optimizadas.</p>
                   </div>
+                  <button onClick={startRoute} disabled={routeActionLoading}
+                    className="bg-[#E61A27] text-white text-sm font-bold px-6 py-3 rounded-xl hover:bg-[#B31217] disabled:opacity-60 transition-colors flex items-center gap-2 mx-auto">
+                    {routeActionLoading ? <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> : null}
+                    Iniciar ruta del día
+                  </button>
                 </div>
-              )}
+              ) : (
+                <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-base font-bold text-gray-900">Estado de la ruta</h2>
+                    {routeStatusMeta && (
+                      <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${routeStatusMeta.color}`}>
+                        {routeStatusMeta.label}
+                      </span>
+                    )}
+                  </div>
 
-              <AnimatePresence>
-                {showMissingForm && (
-                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-                    <div className="pt-2 space-y-3">
-                      <textarea value={missingNotes} onChange={e => setMissingNotes(e.target.value)} rows={3}
-                        placeholder="Describe qué pedido o productos faltan en el camión…"
-                        className="w-full border border-gray-200 rounded-xl px-3.5 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-red-200 focus:border-red-400" />
-                      <button onClick={handleMissingRoute} disabled={routeActionLoading || !missingNotes.trim()}
-                        className="w-full h-11 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold text-sm transition-colors flex items-center justify-center gap-2">
+                  {routeStatus === 'programado' && (
+                    <button onClick={handleLoad} disabled={routeActionLoading}
+                      className="w-full h-14 rounded-xl bg-yellow-500 hover:bg-yellow-600 disabled:opacity-60 text-white font-bold text-base transition-colors flex items-center justify-center gap-2 shadow-sm">
+                      {routeActionLoading
+                        ? <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                        : <><svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" /></svg>Comenzar carga del camión</>}
+                    </button>
+                  )}
+
+                  {routeStatus === 'cargando' && (
+                    <div className="space-y-2">
+                      <button onClick={handleDepart} disabled={routeActionLoading}
+                        className="w-full h-14 rounded-xl bg-[#E61A27] hover:bg-[#B31217] disabled:opacity-60 text-white font-bold text-base transition-colors flex items-center justify-center gap-2 shadow-sm">
                         {routeActionLoading
-                          ? <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                          : 'Confirmar faltante'}
+                          ? <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                          : <><svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0M3 7h18M3 7l2-4h14l2 4M3 7v10h1m15 0h1V7" /></svg>Salir del CEDIS</>}
+                      </button>
+                      <button onClick={() => setShowMissingForm(v => !v)}
+                        className="w-full h-11 rounded-xl border border-red-200 text-sm font-medium text-red-500 hover:bg-red-50 transition-colors">
+                        Reportar pedido faltante en carga
                       </button>
                     </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+                  )}
+
+                  {(routeStatus === 'finalizado' || routeStatus === 'entregado') && (
+                    <div className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-xl px-4 py-4">
+                      <div className="w-9 h-9 bg-green-100 rounded-xl flex items-center justify-center shrink-0">
+                        <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-green-800">Ruta finalizada</p>
+                        <p className="text-xs text-green-600 mt-0.5">Todos los pedidos del día han sido procesados.</p>
+                      </div>
+                    </div>
+                  )}
+
+                  <AnimatePresence>
+                    {showMissingForm && (
+                      <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                        <div className="pt-2 space-y-3">
+                          <textarea value={missingNotes} onChange={e => setMissingNotes(e.target.value)} rows={3}
+                            placeholder="Describe qué pedido o productos faltan en el camión…"
+                            className="w-full border border-gray-200 rounded-xl px-3.5 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-red-200 focus:border-red-400" />
+                          <button onClick={handleMissingRoute} disabled={routeActionLoading || !missingNotes.trim()}
+                            className="w-full h-11 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold text-sm transition-colors flex items-center justify-center gap-2">
+                            {routeActionLoading
+                              ? <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                              : 'Confirmar faltante'}
+                          </button>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* ── Vista mañana (solo lectura) ─────────────────────────────── */
+            <div className="space-y-3">
+              {tomorrowOrders.length === 0 ? (
+                <div className="bg-white rounded-2xl border border-dashed border-gray-200 p-12 text-center">
+                  <div className="w-12 h-12 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                    <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                  </div>
+                  <p className="text-gray-900 font-semibold text-sm">Sin pedidos para mañana</p>
+                  <p className="text-gray-400 text-xs mt-1">No hay entregas asignadas para el día siguiente.</p>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-2.5 bg-blue-50 border border-blue-100 rounded-xl px-4 py-3">
+                    <svg className="w-4 h-4 text-blue-400 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <p className="text-sm text-blue-700 font-medium">
+                      Vista previa · {tomorrowOrders.length} pedido{tomorrowOrders.length !== 1 ? 's' : ''} para mañana
+                    </p>
+                  </div>
+
+                  <RouteMap
+                    stops={tomorrowStops}
+                    cedis={cedisLocation}
+                    canComplete={false}
+                    completingStop={null}
+                    onCompleteStop={() => {}}
+                    onMissingStop={() => {}}
+                  />
+
+                  {tomorrowOrders.map(o => {
+                    const address = o.direccion_entrega ?? o.usuario?.direccion;
+                    return (
+                      <div key={o._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                        <div className="flex items-center justify-between px-4 pt-4 pb-2">
+                          <div className="flex items-center gap-2">
+                            <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${STATUS_BADGE[o.status_final] ?? 'bg-gray-100 text-gray-600'}`}>
+                              {o.status_final}
+                            </span>
+                            <span className="text-xs font-mono text-gray-400">{o.id_pedido ?? o._id}</span>
+                          </div>
+                        </div>
+                        {address && (
+                          <div className="px-4 pb-2 flex items-start gap-2">
+                            <svg className="w-4 h-4 text-gray-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0zM15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                            </svg>
+                            <p className="text-sm text-gray-700 leading-snug">{address}</p>
+                          </div>
+                        )}
+                        {(o.items ?? []).length > 0 && (
+                          <div className="mx-4 mb-4 bg-gray-50 rounded-xl p-3 space-y-1">
+                            {o.items!.slice(0, 3).map((item, i) => (
+                              <div key={i} className="flex justify-between text-xs text-gray-600">
+                                <span className="truncate mr-2">{item.nombre}</span>
+                                <span className="font-mono shrink-0 text-gray-400">×{item.cantidad}</span>
+                              </div>
+                            ))}
+                            {o.items!.length > 3 && <p className="text-xs text-gray-400">+{o.items!.length - 3} más</p>}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </>
+              )}
             </div>
           )}
         </motion.div>
