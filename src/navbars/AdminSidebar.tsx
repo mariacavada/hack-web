@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
-import { LayoutDashboard, Users, PackageOpen, Presentation, ChartSpline } from 'lucide-react';
+import { LayoutDashboard, Users, PackageOpen, Presentation, ChartSpline, Warehouse } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../auth/AuthContext';
 import tualiLogo from '../assets/logos/logo.png';
@@ -18,6 +18,7 @@ const AdminSidebar: React.FC = () => {
     { name: 'Predicciones',path: '/admin/predicciones',icon: <Presentation size={18} /> },
     { name: 'Analítica',   path: '/admin/analiticas',  icon: <ChartSpline size={18} /> },
     { name: 'Usuarios',    path: '/admin/usuarios',    icon: <Users size={18} /> },
+    { name: 'CEDIS',       path: '/admin/cedis',        icon: <Warehouse size={18} /> },
   ];
 
   return (

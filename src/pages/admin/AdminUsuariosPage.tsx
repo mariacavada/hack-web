@@ -88,22 +88,18 @@ function computeRepartidorStats(userId: string, orders: Order[]): RepartidorStat
 }
 
 const STATUS_BADGE: Record<string, string> = {
-  'pendiente':       'bg-yellow-100 text-yellow-700',
-  'Pendiente':       'bg-yellow-100 text-yellow-700',
-  'confirmado':      'bg-blue-100 text-blue-700',
-  'Confirmado':      'bg-blue-100 text-blue-700',
-  'en preparación':  'bg-indigo-100 text-indigo-700',
-  'En preparación':  'bg-indigo-100 text-indigo-700',
+  'recibido':        'bg-yellow-100 text-yellow-700',
   'preparando':      'bg-indigo-100 text-indigo-700',
-  'Preparando':      'bg-indigo-100 text-indigo-700',
   'en camino':       'bg-orange-100 text-orange-700',
-  'En camino':       'bg-orange-100 text-orange-700',
-  'en ruta':         'bg-orange-100 text-orange-700',
-  'En ruta':         'bg-orange-100 text-orange-700',
   'entregado':       'bg-green-100 text-green-700',
-  'Entregado':       'bg-green-100 text-green-700',
   'cancelado':       'bg-red-100 text-red-700',
+  'Recibido':        'bg-yellow-100 text-yellow-700',
+  'Preparando':      'bg-indigo-100 text-indigo-700',
+  'En camino':       'bg-orange-100 text-orange-700',
+  'Entregado':       'bg-green-100 text-green-700',
   'Cancelado':       'bg-red-100 text-red-700',
+  'pendiente':       'bg-yellow-100 text-yellow-700',
+  'confirmado':      'bg-blue-100 text-blue-700',
 };
 
 type SortDir = 'desc' | 'asc';
@@ -440,8 +436,8 @@ export default function AdminUsuariosPage() {
                             <span className="text-sm font-mono font-bold text-gray-700 truncate">
                               {selectedStats.pedidoReciente.id_pedido ?? selectedStats.pedidoReciente._id}
                             </span>
-                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${STATUS_BADGE[selectedStats.pedidoReciente.status_final] ?? 'bg-gray-100 text-gray-600'}`}>
-                              {selectedStats.pedidoReciente.status_final}
+                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${STATUS_BADGE[selectedStats.pedidoReciente.status_final] ?? STATUS_BADGE[selectedStats.pedidoReciente.status_final?.toLowerCase()] ?? 'bg-gray-100 text-gray-600'}`}>
+                              {(() => { const s = selectedStats.pedidoReciente.status_final ?? ''; return s.charAt(0).toUpperCase() + s.slice(1); })()}
                             </span>
                           </div>
                           <p className="text-xs text-gray-400">

@@ -13,10 +13,22 @@ const COLORS = ['#E61A27', '#F87171', '#FCA5A5', '#FBBFCA', '#FB923C', '#F59E0B'
 interface AnyOrder {
   _id: string;
   status_final: string;
+  customer_id?: string;
+  total?: number;
+  subtotal?: number;
   items?: { nombre?: string; cantidad?: number }[];
   createdAt?: string;
   fecha_pedido?: string;
   updatedAt?: string;
+}
+
+interface AnyUser {
+  _id: string;
+  customer_id?: string;
+  nombre_negocio?: string;
+  nombre?: string;
+  email?: string;
+  role?: string;
 }
 
 interface RiskItem {
@@ -55,6 +67,7 @@ export default function AdminAnaliticasPage() {
   const [risk,      setRisk]      = useState<RiskItem[]>([]);
   const [lowStock,  setLowStock]  = useState<LowStockItem[]>([]);
   const [skuNames,  setSkuNames]  = useState<Record<string, string>>({});
+  const [users,     setUsers]     = useState<AnyUser[]>([]);
   const [loading,   setLoading]   = useState(true);
 
   const token = localStorage.getItem('or_token') ?? '';
@@ -66,8 +79,11 @@ export default function AdminAnaliticasPage() {
       fetch(`${API}/api/admin/inventory/depletion-risk`,  { headers: h }).then(r => r.ok ? r.json() : []),
       fetch(`${API}/api/admin/inventory/low-stock`,       { headers: h }).then(r => r.ok ? r.json() : []),
       fetch(`${API}/api/ai/products`,                     { headers: h }).then(r => r.ok ? r.json() : []),
+      fetch(`${API}/api/admin/users`,                     { headers: h }).then(r => r.ok ? r.json() : []),
     ])
-      .then(async ([o, ri, ls, catalog]) => {
+      .then(async ([o, ri, ls, catalog, u]) => {
+        const usersArr: AnyUser[] = Array.isArray(u) ? u : u?.users ?? [];
+        setUsers(usersArr);
         const rawOrders: AnyOrder[] = Array.isArray(o) ? o : o?.orders ?? [];
         const riskArr = Array.isArray(ri) ? ri : ri?.items ?? ri?.predictions ?? [];
         const lsArr   = Array.isArray(ls) ? ls : ls?.items ?? [];
@@ -162,6 +178,28 @@ export default function AdminAnaliticasPage() {
   const resolveName = (sku: string, nombre?: string) =>
     (nombre ?? skuNames[String(sku)] ?? sku).slice(0, 22);
 
+  // 5. Top clientes por gasto
+  const topClientes = (() => {
+    const spend: Record<string, number> = {};
+    const count: Record<string, number> = {};
+    orders.forEach(o => {
+      if (!o.customer_id) return;
+      spend[o.customer_id] = (spend[o.customer_id] ?? 0) + (o.total ?? o.subtotal ?? 0);
+      count[o.customer_id] = (count[o.customer_id] ?? 0) + 1;
+    });
+    return Object.entries(spend)
+      .map(([id, total]) => {
+        const u = users.find(u => u._id === id || u.customer_id === id);
+        return {
+          nombre: u?.nombre_negocio ?? u?.nombre ?? u?.email ?? id,
+          total,
+          pedidos: count[id] ?? 0,
+        };
+      })
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 5);
+  })();
+
   // 4. Stock predictivo — días hasta agotamiento
   const stockRisk = risk
     .map(r => ({
@@ -231,14 +269,14 @@ export default function AdminAnaliticasPage() {
           {productSales.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-10">Sin datos de productos</p>
           ) : (
-            <ResponsiveContainer width="100%" height={280}>
-              <PieChart>
+            <ResponsiveContainer width="100%" height={380}>
+              <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                 <Pie
                   data={productSales}
                   cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={100}
+                  cy="42%"
+                  innerRadius={65}
+                  outerRadius={110}
                   paddingAngle={3}
                   dataKey="value"
                 />
@@ -251,6 +289,10 @@ export default function AdminAnaliticasPage() {
                   contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }}
                 />
                 <Legend
+                  layout="horizontal"
+                  verticalAlign="bottom"
+                  align="center"
+                  wrapperStyle={{ paddingTop: 16, fontSize: 11 }}
                   formatter={(value) => <span style={{ fontSize: 11, color: '#6b7280' }}>{value}</span>}
                 />
               </PieChart>
@@ -411,6 +453,45 @@ export default function AdminAnaliticasPage() {
           )}
         </div>
       </div>
+
+      {/* Row 4: Top clientes por gasto */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+        {sectionTitle('Top clientes por gasto', 'Clientes con mayor volumen de compra acumulado')}
+        {topClientes.length === 0 ? (
+          <p className="text-sm text-gray-400 text-center py-6">Sin datos de clientes</p>
+        ) : (
+          <div className="space-y-3">
+            {topClientes.map((c, i) => {
+              const max = topClientes[0].total;
+              const pct = max > 0 ? (c.total / max) * 100 : 0;
+              const medals = ['🥇', '🥈', '🥉'];
+              return (
+                <div key={i} className="flex items-center gap-4">
+                  <span className="text-lg w-6 shrink-0 text-center">{medals[i] ?? `${i + 1}`}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="text-sm font-semibold text-gray-800 truncate pr-2">{c.nombre}</p>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <span className="text-xs text-gray-400">{c.pedidos} pedidos</span>
+                        <span className="text-sm font-bold text-gray-900">
+                          ${c.total.toLocaleString('es-MX', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-[#E61A27] transition-all duration-500"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
     </div>
   );
 }
