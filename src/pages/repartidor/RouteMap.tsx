@@ -254,12 +254,17 @@ export default function RouteMap({
 
                   {/* Status badge */}
                   <span className={`text-[11px] font-bold px-2 py-1 rounded-full shrink-0 mt-0.5 ${
-                    done      ? 'bg-green-100 text-green-700'
-                    : focused  ? 'bg-violet-100 text-violet-700'
-                    : !hasCoord ? 'bg-gray-100 text-gray-400'
-                    :            'bg-orange-50 text-orange-600'
+                    done                           ? 'bg-green-100 text-green-700'
+                    : focused                      ? 'bg-violet-100 text-violet-700'
+                    : stop.status === 'En camino'  ? 'bg-orange-100 text-orange-700'
+                    : !hasCoord                    ? 'bg-gray-100 text-gray-400'
+                    :                                'bg-blue-50 text-blue-600'
                   }`}>
-                    {done ? 'Entregado' : focused ? 'Ver ↑' : !hasCoord ? 'Sin GPS' : 'Pendiente'}
+                    {done              ? 'Entregado'
+                    : focused          ? 'Ver ↑'
+                    : stop.status === 'En camino' ? 'En camino'
+                    : !hasCoord        ? 'Sin GPS'
+                    :                   (stop.status ?? 'Pendiente')}
                   </span>
                 </button>
 

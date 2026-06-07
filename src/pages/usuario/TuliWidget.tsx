@@ -67,6 +67,25 @@ function TuliWidgetInner() {
     return "Llevándote al checkout.";
   });
 
+  useConversationClientTool("viewOrder", () => {
+    navigate("/usuario/tienda/checkout");
+    return "Llevándote a revisar tu pedido.";
+  });
+
+  useConversationClientTool("removeFromCart", (params: { sku?: string }) => {
+    const sku = params.sku?.toString().trim();
+    if (!sku) return "No se proporcionó un SKU válido.";
+
+    const product = productsRef.current.find((p) => p.sku === sku);
+    if (!product) return `No encontré el producto con SKU ${sku}.`;
+
+    const currentQty = cartRef.current[sku] ?? 0;
+    if (currentQty === 0) return `${product.nombre} no está en el carrito.`;
+
+    setQty(sku, 0);
+    return `Eliminé ${product.nombre} del carrito.`;
+  });
+
   useEffect(() => {
     if (status !== "connected" || products.length === 0) return;
     const catalog = products
