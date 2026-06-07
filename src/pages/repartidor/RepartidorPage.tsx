@@ -225,6 +225,16 @@ export default function RepartidorPage() {
 
   const todayOrders = useMemo(() => orders.filter(isToday), [orders]);
 
+  // Orders that belong to the current route (by stop.order_id), falling back to todayOrders.
+  // Used for finalization check and incidencias dropdown — avoids false positives from isToday
+  // excluding orders whose fecha_entrega is a future date but are in today's route.
+  const routeOrders = useMemo(() => {
+    if (!route?.stops?.length) return todayOrders;
+    const ids = new Set(route.stops.map(s => s.order_id).filter(Boolean));
+    const matched = orders.filter(o => ids.has(o._id));
+    return matched.length > 0 ? matched : todayOrders;
+  }, [route?.stops, orders, todayOrders]);
+
   const selectedDateOrders = useMemo(() => {
     const sel = selectedDate.toDateString();
     return orders.filter(o => {
@@ -308,14 +318,12 @@ export default function RepartidorPage() {
   const TERMINAL_STATUSES = new Set(['Entregado', 'Incompleto', 'Cancelado']);
 
   useEffect(() => {
-    if (!route) return;
-    const todayList = orders.filter(isToday);
-    if (todayList.length === 0) return;
-    if (todayList.every(o => TERMINAL_STATUSES.has(o.status_final))) {
+    if (!route || routeOrders.length === 0) return;
+    if (routeOrders.every(o => TERMINAL_STATUSES.has(o.status_final))) {
       setRoute(r => r ? { ...r, current_status: 'entregado' } : r);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orders, route?._id]);
+  }, [routeOrders, route?._id]);
 
   // ── Status update ─────────────────────────────────────────────────────────
   const updateOrderStatus = async (
@@ -862,7 +870,7 @@ export default function RepartidorPage() {
                 <select value={incidentOrder} onChange={e => setIncidentOrder(e.target.value)}
                   className="w-full border border-gray-200 rounded-xl px-3.5 py-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#E61A27]/20 focus:border-[#E61A27]">
                   <option value="">Selecciona un pedido</option>
-                  {orders.map(o => (
+                  {routeOrders.map(o => (
                     <option key={o._id} value={o._id}>{o.id_pedido ?? o._id}</option>
                   ))}
                 </select>
