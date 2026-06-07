@@ -404,6 +404,61 @@ export default function AdminCedisPage() {
                 ) : 'Siguiente →'}
               </button>
             </div>
+
+            {/* Preview deshabilitado de la tienda */}
+            <div className="mt-10 pointer-events-none select-none opacity-40">
+              {/* Search + category filters skeleton */}
+              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 mb-5 space-y-3">
+                <div className="relative">
+                  <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                    <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+                  </svg>
+                  <input disabled placeholder="Buscar producto..."
+                    className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 cursor-not-allowed" />
+                </div>
+                <div className="flex gap-1.5 overflow-x-hidden pb-0.5">
+                  {['Todos', ...CATEGORY_ORDER.slice(0, 5)].map(cat => (
+                    <div key={cat}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded border text-xs font-medium whitespace-nowrap bg-white text-gray-600 border-gray-200 shrink-0">
+                      <span className="text-sm opacity-80">{cat === 'Todos' ? '🏪' : CATEGORY_ICONS[cat] ?? '📦'}</span>
+                      {cat}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Product card skeletons */}
+              {CATEGORY_ORDER.slice(0, 2).map(cat => (
+                <div key={cat} className="mb-6 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">{CATEGORY_ICONS[cat]}</span>
+                    <span className="text-sm font-bold text-gray-700 uppercase tracking-wider">{cat}</span>
+                  </div>
+                  <div className="flex gap-3 overflow-x-hidden">
+                    {Array.from({ length: 4 }).map((_, i) => (
+                      <div key={i} className="shrink-0 w-36 bg-white rounded-2xl border border-gray-100 shadow-sm flex flex-col overflow-hidden">
+                        <div className="h-28 bg-gray-100" />
+                        <div className="p-2.5 space-y-2">
+                          <div className="h-3 bg-gray-200 rounded w-3/4" />
+                          <div className="h-2.5 bg-gray-100 rounded w-1/2" />
+                          <div className="flex items-center justify-between mt-2">
+                            <div className="h-4 bg-gray-200 rounded w-10" />
+                            <div className="w-7 h-7 rounded-full bg-gray-200" />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+
+              {/* Footer button skeleton */}
+              <div className="mt-6 flex justify-end">
+                <div className="px-6 py-2.5 bg-[#E61A27] text-white text-sm font-semibold rounded-xl opacity-40 cursor-not-allowed">
+                  Ver resumen
+                </div>
+              </div>
+            </div>
           </motion.div>
         )}
 

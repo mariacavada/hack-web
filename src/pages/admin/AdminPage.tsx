@@ -42,6 +42,17 @@ interface Order {
   tracking?: { status: string; timestamp: string }[];
 }
 
+interface Stats {
+  total:          number;
+  hoy:            number;
+  activos:        number;
+  pendientes:     number;
+  entregados:     number;
+  cancelados:     number;
+  nivel_servicio: number;
+  revenue_total:  number;
+}
+
 interface LowStockItem {
   sku: string;
   nombre?: string;
@@ -80,6 +91,7 @@ export default function AdminPage() {
   const location = useLocation();
   const [orders, setOrders] = useState<Order[]>([]);
   const [customerMap, setCustomerMap] = useState<Record<string, string>>({});
+  const [stats, setStats] = useState<Stats | null>(null);
   const [lowStock, setLowStock] = useState<LowStockItem[]>([]);
   const [riskItems, setRiskItems] = useState<RiskItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -99,13 +111,16 @@ export default function AdminPage() {
   const h = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 
   useEffect(() => {
+    const tk = localStorage.getItem('or_token') ?? '';
+    const headers = { Authorization: `Bearer ${tk}`, 'Content-Type': 'application/json' };
     Promise.all([
-      fetch(`${API}/api/admin/orders`, { headers: h }).then(r => r.ok ? r.json() : []),
-      fetch(`${API}/api/admin/users`,  { headers: h }).then(r => r.ok ? r.json() : []),
-      fetch(`${API}/api/admin/inventory/low-stock?cedis_id=3012`, { headers: h }).then(r => r.ok ? r.json() : []),
-      fetch(`${API}/api/admin/inventory/depletion-risk?nivel=critico`, { headers: h }).then(r => r.ok ? r.json() : []),
+      fetch(`${API}/api/admin/orders?limit=500`, { headers }).then(r => r.ok ? r.json() : []),
+      fetch(`${API}/api/admin/users?limit=500`,  { headers }).then(r => r.ok ? r.json() : []),
+      fetch(`${API}/api/admin/stats`,            { headers }).then(r => r.ok ? r.json() : null),
+      fetch(`${API}/api/admin/inventory/low-stock?cedis_id=3012`, { headers }).then(r => r.ok ? r.json() : []),
+      fetch(`${API}/api/admin/inventory/depletion-risk?nivel=critico`, { headers }).then(r => r.ok ? r.json() : []),
     ])
-      .then(([o, u, ls, ri]) => {
+      .then(([o, u, st, ls, ri]) => {
         const rawOrders: any[] = Array.isArray(o) ? o : o?.orders ?? [];
         const rawUsers: any[]  = Array.isArray(u) ? u : u?.users ?? [];
         const map: Record<string, string> = {};
@@ -113,6 +128,7 @@ export default function AdminPage() {
           if (usr._id) map[usr._id] = usr.nombre_negocio ?? usr.nombre ?? usr.name ?? usr.email ?? usr._id;
         });
         setCustomerMap(map);
+        setStats(st ?? null);
         setOrders(rawOrders.map(r => ({
           ...r,
           items: (r.items ?? []).map((it: any) => ({
@@ -154,14 +170,29 @@ export default function AdminPage() {
       {activeTab === 'pedidos' && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
 
+          {/* Stats strip — misma fuente que Analítica y Usuarios */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              { label: 'Total pedidos',   value: stats?.total        ?? '—', color: 'text-gray-900'    },
+              { label: 'Hoy',             value: stats?.hoy          ?? '—', color: 'text-gray-900'    },
+              { label: 'Activos',         value: stats?.activos      ?? '—', color: 'text-blue-600'    },
+              { label: 'Entregados',      value: stats?.entregados   ?? '—', color: 'text-green-600'   },
+            ].map(k => (
+              <div key={k.label} className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm text-center">
+                <p className={`text-2xl font-bold ${k.color}`}>{k.value}</p>
+                <p className="text-[11px] text-gray-400 mt-0.5 leading-tight">{k.label}</p>
+              </div>
+            ))}
+          </div>
+
           {/* Filter pills */}
           {(() => {
             const FILTERS: { label: string; statuses: string[] }[] = [
               { label: 'Todos',       statuses: [] },
-              { label: 'Recibido',    statuses: ['recibido'] },
-              { label: 'Preparando',  statuses: ['preparando'] },
-              { label: 'En camino',   statuses: ['en camino'] },
+              { label: 'Asignado',    statuses: ['asignado'] },
               { label: 'Entregado',   statuses: ['entregado'] },
+              { label: 'Incompleto',  statuses: ['incompleto'] },
+              { label: 'Cancelado',   statuses: ['cancelado'] },
             ];
             const activeFilter = FILTERS.find(f =>
               f.statuses.length === 0
@@ -236,6 +267,8 @@ export default function AdminPage() {
                         try {
                           const id   = o._id;
                           const pid  = o.id_pedido ?? o._id;
+                          const tk2  = localStorage.getItem('or_token') ?? '';
+                          const h2   = { Authorization: `Bearer ${tk2}`, 'Content-Type': 'application/json' };
                           const endpoints = [
                             `${API}/api/admin/orders/${id}`,
                             `${API}/api/admin/orders/${pid}`,
@@ -274,7 +307,7 @@ export default function AdminPage() {
                           let detail: Order | null = null;
                           for (const url of endpoints) {
                             try {
-                              const res = await fetch(url, { headers: h });
+                              const res = await fetch(url, { headers: h2 });
                               if (res.ok) {
                                 const raw = await res.json();
                                 const normalised = normaliseItems(raw);

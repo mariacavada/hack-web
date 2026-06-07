@@ -1,9 +1,48 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   PieChart, Pie, Tooltip, Legend, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
   LineChart, Line,
 } from 'recharts';
+import * as L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+
+/* ── Mapa de calor nativo ─────────────────────────────────────────────────── */
+interface MapPoint { lat: number; lng: number; nombre: string; colonia?: string; municipio?: string; pedidos: number; }
+
+function OrderHeatMap({ points, maxCount }: { points: MapPoint[]; maxCount: number }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!containerRef.current || points.length === 0) return;
+    const center: L.LatLngTuple = [points[0].lat, points[0].lng];
+    const map = L.map(containerRef.current, { scrollWheelZoom: false }).setView(center, 12);
+
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      attribution: '© <a href="https://carto.com/">CARTO</a>',
+    }).addTo(map);
+
+    points.forEach(pt => {
+      const intensity = pt.pedidos / maxCount;
+      const label = [
+        `<b style="font-size:12px">${pt.nombre}</b>`,
+        pt.colonia ? `<span style="color:#6b7280;font-size:11px">${pt.colonia}${pt.municipio ? `, ${pt.municipio}` : ''}</span>` : '',
+        `<span style="color:#E61A27;font-weight:600;font-size:11px">${pt.pedidos} pedido${pt.pedidos !== 1 ? 's' : ''}</span>`,
+      ].filter(Boolean).join('<br>');
+
+      L.circleMarker([pt.lat, pt.lng], {
+        radius: 10 + intensity * 22,
+        fillColor: '#E61A27',
+        fillOpacity: 0.18 + intensity * 0.52,
+        stroke: false,
+      }).bindTooltip(label, { sticky: true }).addTo(map);
+    });
+
+    return () => { map.remove(); };
+  }, [points, maxCount]);
+
+  return <div ref={containerRef} style={{ height: '100%', width: '100%' }} />;
+}
 
 const API = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
 const COLORS = ['#E61A27', '#F87171', '#FCA5A5', '#FBBFCA', '#FB923C', '#F59E0B', '#8B5CF6', '#EC4899'];
@@ -38,6 +77,12 @@ interface AnyUser {
   nombre_negocio?: string;
   nombre?: string;
   email?: string;
+  ubicacion?: {
+    lat?: number;
+    lng?: number;
+    colonia?: string;
+    municipio?: string;
+  };
 }
 interface ProductSale {
   sku: string;
@@ -140,25 +185,27 @@ export default function AdminAnaliticasPage() {
     return Object.entries(map).map(([fecha, pedidos]) => ({ fecha, pedidos })).slice(-14);
   })();
 
-  // Top clientes — from orders + users
-  const topClientes = (() => {
-    const spend: Record<string, number> = {};
-    const count: Record<string, number> = {};
-    orders.forEach(o => {
-      if (!o.customer_id) return;
-      spend[o.customer_id] = (spend[o.customer_id] ?? 0) + (o.total ?? o.subtotal ?? o.valor_pedido ?? 0);
-      count[o.customer_id] = (count[o.customer_id] ?? 0) + 1;
-    });
-    return Object.entries(spend)
-      .map(([id, total]) => {
-        const u = users.find(u => u._id === id || u.customer_id === id);
-        return { nombre: u?.nombre_negocio ?? u?.nombre ?? u?.email ?? id, total, pedidos: count[id] ?? 0 };
-      })
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 5);
-  })();
 
   const diffHoy = stats ? stats.hoy - stats.ayer : 0;
+
+  // Mapa — clientes con ubicacion.lat/lng + conteo de pedidos
+  const mapPoints = (() => {
+    const countByUser: Record<string, number> = {};
+    orders.forEach(o => {
+      if (o.customer_id) countByUser[o.customer_id] = (countByUser[o.customer_id] ?? 0) + 1;
+    });
+    return users
+      .filter(u => u.ubicacion?.lat && u.ubicacion?.lng)
+      .map(u => ({
+        lat:       u.ubicacion!.lat!,
+        lng:       u.ubicacion!.lng!,
+        nombre:    u.nombre_negocio ?? u.nombre ?? u.email ?? '—',
+        colonia:   u.ubicacion?.colonia,
+        municipio: u.ubicacion?.municipio,
+        pedidos:   countByUser[u._id] ?? countByUser[u.customer_id ?? ''] ?? 0,
+      }));
+  })();
+  const maxPedidos = Math.max(...mapPoints.map(p => p.pedidos), 1);
 
   if (loading) {
     return (
@@ -185,11 +232,10 @@ export default function AdminAnaliticasPage() {
           value={`$${(stats?.revenue_total ?? 0).toLocaleString('es-MX', { maximumFractionDigits: 0 })}`} />
       </div>
 
-      {/* Sub-KPIs */}
-      <div className="grid grid-cols-4 gap-3">
+      {/* Sub-KPIs + Mapa de calor */}
+      <div className="grid grid-cols-3 gap-3">
         {[
           { label: 'Activos',     value: stats?.activos    ?? 0, color: 'text-blue-600',   bg: 'bg-blue-50'   },
-          { label: 'Pendientes',  value: stats?.pendientes ?? 0, color: 'text-amber-600',  bg: 'bg-amber-50'  },
           { label: 'Entregados',  value: stats?.entregados ?? 0, color: 'text-green-600',  bg: 'bg-green-50'  },
           { label: 'Cancelados',  value: stats?.cancelados ?? 0, color: 'text-red-600',    bg: 'bg-red-50'    },
         ].map(k => (
@@ -288,38 +334,14 @@ export default function AdminAnaliticasPage() {
         )}
       </div>
 
-      {/* Top clientes */}
+      {/* Mapa de calor */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-        {sectionTitle('Top clientes por gasto', 'Clientes con mayor volumen de compra acumulado')}
-        {topClientes.length === 0 ? (
-          <p className="text-sm text-gray-400 text-center py-6">Sin datos de clientes</p>
+        {sectionTitle('Densidad de pedidos por zona', 'Ubicación geográfica de clientes — tamaño proporcional al volumen de pedidos')}
+        {mapPoints.length === 0 ? (
+          <p className="text-sm text-gray-400 text-center py-10">Sin datos de ubicación de clientes</p>
         ) : (
-          <div className="space-y-3">
-            {topClientes.map((c, i) => {
-              const max = topClientes[0].total;
-              const pct = max > 0 ? (c.total / max) * 100 : 0;
-              const medals = ['🥇', '🥈', '🥉'];
-              return (
-                <div key={i} className="flex items-center gap-4">
-                  <span className="text-lg w-6 shrink-0 text-center">{medals[i] ?? `${i + 1}`}</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-1">
-                      <p className="text-sm font-semibold text-gray-800 truncate pr-2">{c.nombre}</p>
-                      <div className="flex items-center gap-3 shrink-0">
-                        <span className="text-xs text-gray-400">{c.pedidos} pedidos</span>
-                        <span className="text-sm font-bold text-gray-900">
-                          ${c.total.toLocaleString('es-MX', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                      <div className="h-full rounded-full bg-[#E61A27] transition-all duration-500"
-                        style={{ width: `${pct}%` }} />
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+          <div className="h-96 rounded-xl overflow-hidden border border-gray-100">
+            <OrderHeatMap points={mapPoints} maxCount={maxPedidos} />
           </div>
         )}
       </div>

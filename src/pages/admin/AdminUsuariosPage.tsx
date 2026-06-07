@@ -60,6 +60,19 @@ interface UserStats {
   productoEstrella: string;
 }
 
+const DONE_STATUSES = new Set(['entregado', 'cancelado', 'incompleto']);
+
+function countActiveOrders(userId: string, orders: Order[]): number {
+  return orders.filter(o => {
+    const isThisUser =
+      o.customer_id === userId ||
+      String(o.customer_id) === String(userId) ||
+      (o.usuario?._id ?? o.usuario?.id ?? '') === userId;
+    const status = (o.status_final ?? '').toLowerCase();
+    return isThisUser && status !== '' && !DONE_STATUSES.has(status);
+  }).length;
+}
+
 function computeStats(userId: string, orders: Order[]): UserStats {
   const mine = orders.filter(o =>
     o.customer_id === userId ||
@@ -115,6 +128,53 @@ const STATUS_BADGE: Record<string, string> = {
 
 type SortDir = 'desc' | 'asc';
 
+/* ── Ranking card ───────────────────────────────────────────────── */
+function RankingCard({
+  title, sub, items, valueLabel, valuePrefix = '',
+}: {
+  title: string;
+  sub?: string;
+  items: { nombre: string; value: number; meta?: string }[];
+  valueLabel: string;
+  valuePrefix?: string;
+}) {
+  const max = Math.max(...items.map(i => i.value), 1);
+  const medals = ['🥇', '🥈', '🥉'];
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 w-64 shrink-0 h-full flex flex-col">
+      <p className="text-sm font-bold text-gray-900 leading-tight">{title}</p>
+      {sub && <p className="text-[11px] text-gray-400 mt-0.5 mb-3">{sub}</p>}
+      {items.length === 0 ? (
+        <p className="text-xs text-gray-400 text-center py-4">Sin datos</p>
+      ) : (
+        <div className="space-y-3 mt-3">
+          {items.map((item, i) => {
+            const pct = max > 0 ? (item.value / max) * 100 : 0;
+            return (
+              <div key={i}>
+                <div className="flex items-center justify-between mb-1 gap-2">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-sm shrink-0">{medals[i] ?? `${i + 1}`}</span>
+                    <p className="text-xs font-semibold text-gray-800 truncate">{item.nombre}</p>
+                  </div>
+                  <p className="text-xs font-bold text-gray-900 shrink-0 tabular-nums">
+                    {valuePrefix}{item.value.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                  </p>
+                </div>
+                <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                  <div className="h-full rounded-full bg-[#E61A27] transition-all duration-500" style={{ width: `${pct}%` }} />
+                </div>
+                {item.meta && <p className="text-[10px] text-gray-400 mt-0.5">{item.meta}</p>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <p className="text-[10px] text-gray-400 mt-3 text-right">{valueLabel}</p>
+    </div>
+  );
+}
+
 /* ── Reusable compact table ─────────────────────────────────────── */
 function UserTable({
   title, users, orders, search, onSelect, scrollable = false, mode = 'cliente',
@@ -169,7 +229,7 @@ function UserTable({
         </button>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden w-full">
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden w-full flex flex-col flex-1">
         {rows.length === 0 ? (
           <p className="py-6 text-center text-xs text-gray-400">Sin resultados.</p>
         ) : (
@@ -179,7 +239,7 @@ function UserTable({
               <span>Usuario</span>
               <span className="text-center">{mode === 'repartidor' ? '# Entregados' : '# Pedidos'}</span>
               <span />
-              <span>{mode === 'repartidor' ? 'Último pedido' : ''}</span>
+              <span>{mode === 'repartidor' ? 'Último pedido' : 'Activos'}</span>
               <span />
             </div>
             <div className={`divide-y divide-gray-100 ${scrollable ? 'overflow-y-auto max-h-63' : ''}`}>
@@ -187,6 +247,7 @@ function UserTable({
                 const displayName = u.nombre_negocio ?? u.nombre ?? u.name ?? u.email;
                 const initials = displayName.slice(0, 2).toUpperCase();
                 const repStats = mode === 'repartidor' ? computeRepartidorStats(u._id, orders) : null;
+                const activeCount = mode === 'cliente' ? countActiveOrders(u._id, orders) : 0;
                 const ultimoLabel = repStats?.ultimoPedido
                   ? new Date(repStats.ultimoPedido.fecha_entrega ?? repStats.ultimoPedido.fecha_pedido ?? repStats.ultimoPedido.created_at ?? '').toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })
                   : '—';
@@ -206,7 +267,14 @@ function UserTable({
                     </div>
                     <p className="text-xs font-bold text-gray-900 text-center">{count}</p>
                     <span />
-                    <p className="text-xs text-gray-400 truncate pr-2">{mode === 'repartidor' ? ultimoLabel : ''}</p>
+                    {mode === 'repartidor'
+                      ? <p className="text-xs text-gray-400 truncate pr-2">{ultimoLabel}</p>
+                      : <p className="text-xs font-bold">
+                          {activeCount > 0
+                            ? <span className="text-blue-600">{activeCount}</span>
+                            : <span className="text-gray-300">—</span>}
+                        </p>
+                    }
                     <button
                       onClick={() => onSelect(u)}
                       className="text-[11px] font-semibold text-gray-800 bg-gray-100 hover:bg-gray-200 px-2.5 py-1 rounded-lg transition-colors"
@@ -297,6 +365,39 @@ export default function AdminUsuariosPage() {
     return Object.entries(freq).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '—';
   }, [profileItems]);
 
+  const topClientesRanking = useMemo(() =>
+    clientes
+      .map(u => {
+        const s = computeStats(u._id, orders);
+        return {
+          nombre: u.nombre_negocio ?? u.nombre ?? (u as any).name ?? u.email ?? '—',
+          value:  s.totalGastado,
+          meta:   `${s.totalPedidos} pedidos`,
+        };
+      })
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 3),
+    [clientes, orders]
+  );
+
+  const topRepartidoresRanking = useMemo(() =>
+    repartidores
+      .map(u => {
+        const entregados = orders.filter(o =>
+          o.driver_id === u._id && o.status_final?.toLowerCase() === 'entregado'
+        );
+        const value = entregados.reduce((s, o) => s + (o.total ?? o.subtotal ?? (o as any).SubTotal ?? 0), 0);
+        return {
+          nombre: u.nombre_negocio ?? u.nombre ?? (u as any).name ?? u.email ?? '—',
+          value,
+          meta: `${entregados.length} entregas`,
+        };
+      })
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 3),
+    [repartidores, orders]
+  );
+
   const isRepartidor = selected?.role === 'driver' || selected?.role === 'repartidor' || selected?.rol === 'repartidor';
   const repartidorStats = useMemo(
     () => (selected && isRepartidor) ? computeRepartidorStats(selected._id, orders) : null,
@@ -333,25 +434,33 @@ export default function AdminUsuariosPage() {
         </div>
       </div>
 
-      {/* Stats strip — same data source as Analítica (/api/admin/stats) */}
-      <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
-        {[
-          { label: 'Clientes',         value: clientes.length,              color: 'text-gray-900' },
-          { label: 'Repartidores',     value: repartidores.length,          color: 'text-gray-900' },
-          { label: 'Total pedidos',    value: stats?.total ?? '—',          color: 'text-gray-900' },
-          { label: 'Pedidos activos',  value: stats?.activos ?? '—',        color: 'text-blue-600' },
-          { label: 'Entregados',       value: stats?.entregados ?? '—',     color: 'text-green-600' },
-          { label: 'Nivel servicio',   value: stats ? `${stats.nivel_servicio}%` : '—', color: 'text-[#E61A27]' },
-        ].map(k => (
-          <div key={k.label} className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm text-center">
-            <p className={`text-2xl font-bold ${k.color}`}>{k.value}</p>
-            <p className="text-[11px] text-gray-400 mt-0.5 leading-tight">{k.label}</p>
-          </div>
-        ))}
+      {/* Clientes: ranking + tabla */}
+      <div className="flex gap-4 items-stretch">
+        <RankingCard
+          title="Top clientes por gasto"
+          sub="Mayor volumen de compra acumulado"
+          items={topClientesRanking}
+          valueLabel="MXN acumulado"
+          valuePrefix="$"
+        />
+        <div className="flex-1 min-w-0 flex flex-col">
+          <UserTable title="Clientes" users={clientes} orders={orders} search={search} onSelect={setSelected} scrollable />
+        </div>
       </div>
 
-      <UserTable title="Clientes"     users={clientes}     orders={orders} search={search} onSelect={setSelected} scrollable />
-      <UserTable title="Repartidores" users={repartidores} orders={orders} search={search} onSelect={setSelected} mode="repartidor" />
+      {/* Repartidores: ranking + tabla */}
+      <div className="flex gap-4 items-stretch">
+        <RankingCard
+          title="Top repartidores por gasto"
+          sub="Mayor volumen acumulado en pedidos entregados"
+          items={topRepartidoresRanking}
+          valueLabel="MXN acumulado"
+          valuePrefix="$"
+        />
+        <div className="flex-1 min-w-0 flex flex-col">
+          <UserTable title="Repartidores" users={repartidores} orders={orders} search={search} onSelect={setSelected} mode="repartidor" />
+        </div>
+      </div>
 
       {/* Profile side panel */}
       <AnimatePresence>
