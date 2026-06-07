@@ -14,6 +14,14 @@ interface ChatApiMessage {
   timestamp?: string;
 }
 
+export interface ChatSessionSummary {
+  _id: string;
+  started_at: string;
+  ended_at: string | null;
+  order_id: string | null;
+  messages: ChatApiMessage[];
+}
+
 const API = import.meta.env.VITE_API_URL ?? "https://hack-back.up.railway.app";
 const SESSION_KEY = "or_chat_session";
 
@@ -39,21 +47,45 @@ export function useChatbot() {
     localStorage.setItem(SESSION_KEY, id);
   }, []);
 
-  const loadSession = useCallback(async () => {
-    if (!sessionId || !user?.token) return;
+  const loadSession = useCallback(
+    async (id?: string) => {
+      const targetId = id ?? sessionId;
+      if (!targetId || !user?.token) return;
 
-    const res = await fetch(`${API}/api/chatbot/sessions/${sessionId}`, {
+      const res = await fetch(`${API}/api/chatbot/sessions/${targetId}`, {
+        headers: { Authorization: `Bearer ${user.token}` },
+      });
+      if (!res.ok) {
+        if (targetId === sessionId) {
+          localStorage.removeItem(SESSION_KEY);
+          setSessionId(null);
+        }
+        return;
+      }
+
+      const data = (await res.json()) as { messages: ChatApiMessage[] };
+      persistSession(targetId);
+      setMessages(data.messages.map(toChatMessage));
+    },
+    [sessionId, user?.token, persistSession]
+  );
+
+  const loadSessions = useCallback(async (): Promise<ChatSessionSummary[]> => {
+    if (!user?.token) return [];
+
+    const res = await fetch(`${API}/api/chatbot/sessions`, {
       headers: { Authorization: `Bearer ${user.token}` },
     });
-    if (!res.ok) {
-      localStorage.removeItem(SESSION_KEY);
-      setSessionId(null);
-      return;
-    }
+    if (!res.ok) return [];
 
-    const data = (await res.json()) as { messages: ChatApiMessage[] };
-    setMessages(data.messages.map(toChatMessage));
-  }, [sessionId, user?.token]);
+    return (await res.json()) as ChatSessionSummary[];
+  }, [user?.token]);
+
+  const startNewSession = useCallback(() => {
+    localStorage.removeItem(SESSION_KEY);
+    setSessionId(null);
+    setMessages([]);
+  }, []);
 
   const sendMessage = useCallback(
     async (question: string, orderId?: string) => {
@@ -103,5 +135,14 @@ export function useChatbot() {
     [sessionId, user?.token, persistSession]
   );
 
-  return { messages, setMessages, sessionId, loading, sendMessage, loadSession };
+  return {
+    messages,
+    setMessages,
+    sessionId,
+    loading,
+    sendMessage,
+    loadSession,
+    loadSessions,
+    startNewSession,
+  };
 }
