@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useChatOrder } from './ChatOrderContext';
 
 const API = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
 
@@ -72,6 +73,7 @@ interface Order {
 }
 
 export default function SeguirPage() {
+  const { setActiveOrderId } = useChatOrder();
   const [orders, setOrders]     = useState<Order[]>([]);
   const [selected, setSelected] = useState<Order | null>(null);
   const [loading, setLoading]   = useState(true);
@@ -109,6 +111,13 @@ export default function SeguirPage() {
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
+
+  // Avisar al asistente sobre qué pedido está viendo el usuario, para que
+  // pueda responder con contexto específico de ese pedido (ver chatbot.service)
+  useEffect(() => {
+    setActiveOrderId(selected?.id_pedido ?? null);
+    return () => setActiveOrderId(null);
+  }, [selected, setActiveOrderId]);
 
   // Reset "see more" whenever a different order is selected
   const handleSelect = (o: Order) => { setSelected(o); setShowAllItems(false); }
