@@ -162,7 +162,7 @@ export default function RepartidorPage() {
     );
   }
 
-  const pendingOrders = orders.filter(o => !['Entregado', 'Cancelado'].includes(o.status_final));
+
   const deliveredOrders = orders.filter(o => o.status_final === 'Entregado');
 
   return (
