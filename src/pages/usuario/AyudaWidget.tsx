@@ -1,13 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { SendHorizontal, Bot, MessageCircle, X } from "lucide-react";
-
-interface Message {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  timestamp: Date;
-}
+import { useChatbot } from "../../hooks/useChatbot";
 
 const suggestions = [
   "¿Dónde está mi pedido?",
@@ -16,21 +10,33 @@ const suggestions = [
   "Hablar con soporte",
 ];
 
-export default function AyudaWidget() {
-  const [isOpen, setIsOpen] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "welcome",
-      role: "assistant",
-      content:
-        "¡Hola! Soy tu asistente de pedidos. Puedo ayudarte a consultar el estado de tus entregas y resolver dudas. ¿En qué puedo ayudarte?",
-      timestamp: new Date(),
-    },
-  ]);
+const welcomeMessage = {
+  id: "welcome",
+  role: "assistant" as const,
+  content:
+    "¡Hola! Soy tu asistente de pedidos. Puedo ayudarte a consultar el estado de tus entregas y resolver dudas. ¿En qué puedo ayudarte?",
+  timestamp: new Date(),
+};
 
+interface AyudaWidgetProps {
+  orderId?: string;
+}
+
+export default function AyudaWidget({ orderId }: AyudaWidgetProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const { messages, setMessages, sessionId, loading, sendMessage, loadSession } = useChatbot();
   const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (sessionId) {
+      loadSession();
+    } else {
+      setMessages([welcomeMessage]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (isOpen) {
@@ -38,53 +44,17 @@ export default function AyudaWidget() {
     }
   }, [messages, loading, isOpen]);
 
-  const sendToGemini = async (message: string): Promise<string> => {
-    await new Promise((resolve) => setTimeout(resolve, 1200));
-    const lower = message.toLowerCase();
-
-    if (lower.includes("pedido") || lower.includes("dónde") || lower.includes("donde")) {
-      return "Con gusto te ayudo. ¿Podrías compartir tu número de pedido o el código de cliente B2B asociado a la entrega?";
-    }
-    if (lower.includes("soporte") || lower.includes("humano")) {
-      return "Puedo ayudarte con información general. Si necesitas atención especializada, puedo derivarte con un supervisor de bodega.";
-    }
-    return "Entendido. Estoy listo para ayudarte con cualquier consulta relacionada con tus pedidos o estado de envío.";
-  };
-
   const handleSend = async (text?: string) => {
     const messageText = (text ?? input).trim();
     if (!messageText || loading) return;
 
-    const userMessage: Message = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: messageText,
-      timestamp: new Date(),
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
     setInput("");
-    setLoading(true);
+    setError(null);
 
     try {
-      const response = await sendToGemini(messageText);
-      const assistantMessage: Message = {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: response,
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, assistantMessage]);
+      await sendMessage(messageText, orderId);
     } catch {
-      const errorMessage: Message = {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: "Ocurrió un error. Inténtalo nuevamente.",
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, errorMessage]);
-    } finally {
-      setLoading(false);
+      setError("Ocurrió un error. Inténtalo nuevamente.");
     }
   };
 
@@ -199,6 +169,9 @@ export default function AyudaWidget() {
 
             {/* Input Form Footer */}
             <footer className="border-t border-zinc-100 p-3 bg-white rounded-b-2xl">
+              {error && (
+                <p className="mb-2 px-1 text-[11px] font-medium text-red-600">{error}</p>
+              )}
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
