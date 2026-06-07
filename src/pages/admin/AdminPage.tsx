@@ -59,22 +59,20 @@ interface RiskItem {
 }
 
 const STATUS_BADGE: Record<string, string> = {
-  'pendiente':       'bg-yellow-100 text-yellow-700',
-  'Pendiente':       'bg-yellow-100 text-yellow-700',
-  'confirmado':      'bg-blue-100 text-blue-700',
-  'Confirmado':      'bg-blue-100 text-blue-700',
-  'en preparación':  'bg-indigo-100 text-indigo-700',
-  'En preparación':  'bg-indigo-100 text-indigo-700',
+  'recibido':        'bg-yellow-100 text-yellow-700',
   'preparando':      'bg-indigo-100 text-indigo-700',
-  'Preparando':      'bg-indigo-100 text-indigo-700',
   'en camino':       'bg-orange-100 text-orange-700',
-  'En camino':       'bg-orange-100 text-orange-700',
-  'en ruta':         'bg-orange-100 text-orange-700',
-  'En ruta':         'bg-orange-100 text-orange-700',
   'entregado':       'bg-green-100 text-green-700',
-  'Entregado':       'bg-green-100 text-green-700',
   'cancelado':       'bg-red-100 text-red-700',
+  // capitalizado por si acaso
+  'Recibido':        'bg-yellow-100 text-yellow-700',
+  'Preparando':      'bg-indigo-100 text-indigo-700',
+  'En camino':       'bg-orange-100 text-orange-700',
+  'Entregado':       'bg-green-100 text-green-700',
   'Cancelado':       'bg-red-100 text-red-700',
+  // aliases legacy
+  'pendiente':       'bg-yellow-100 text-yellow-700',
+  'confirmado':      'bg-blue-100 text-blue-700',
 };
 
 
@@ -159,16 +157,16 @@ export default function AdminPage() {
           {/* Filter pills */}
           {(() => {
             const FILTERS: { label: string; statuses: string[] }[] = [
-              { label: 'Todos',      statuses: [] },
-              { label: 'Preparando', statuses: ['En preparación'] },
-              { label: 'Validando',  statuses: ['Pendiente', 'Confirmado'] },
-              { label: 'En ruta',    statuses: ['En camino'] },
-              { label: 'Entregado',  statuses: ['Entregado'] },
+              { label: 'Todos',       statuses: [] },
+              { label: 'Recibido',    statuses: ['recibido'] },
+              { label: 'Preparando',  statuses: ['preparando'] },
+              { label: 'En camino',   statuses: ['en camino'] },
+              { label: 'Entregado',   statuses: ['entregado'] },
             ];
             const activeFilter = FILTERS.find(f =>
               f.statuses.length === 0
                 ? statusFilter === ''
-                : f.statuses.includes(statusFilter)
+                : f.statuses.includes(statusFilter.toLowerCase())
             ) ?? FILTERS[0];
 
             return (
