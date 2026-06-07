@@ -88,7 +88,21 @@ export default function SeguirPage() {
       .then(r => { if (!r.ok) throw new Error('Error al cargar pedidos'); return r.json(); })
       .then((data: any[]) => {
         if (!Array.isArray(data) || data.length === 0) return;
-        const normalized: Order[] = data.map(o => ({
+        const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+        const todayStr   = new Date().toDateString();
+        const normalized: Order[] = data
+          .filter((o: any) => {
+            const rawDate = o.fecha_entrega ?? o.fecha_pedido;
+            if (!rawDate) return false; // no date → exclude
+            const st = normalizeStatus(o.status_final ?? 'pendiente');
+            if (['Entregado', 'Cancelado'].includes(st)) {
+              // terminal: only show if the order date is today
+              return new Date(rawDate).toDateString() === todayStr;
+            }
+            // active: today or future only
+            return new Date(rawDate) >= todayStart;
+          })
+          .map((o: any) => ({
           id_pedido:        o.id_pedido ?? o._id,
           status_final:     normalizeStatus(o.status_final ?? 'pendiente'),
           fecha_pedido:     o.fecha_pedido ?? o.createdAt ?? new Date().toISOString(),

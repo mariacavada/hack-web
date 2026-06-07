@@ -311,7 +311,10 @@ export default function MisPedidosPage() {
     return new Date(d) >= todayStart
   }
 
-  const activeOrders   = useMemo(() => orders.filter(o => ACTIVE_STATUSES.includes(o.status_final)), [orders])
+  const activeOrders   = useMemo(
+    () => orders.filter(o => ACTIVE_STATUSES.includes(o.status_final) && isTodayOrFuture(o)),
+    [orders, todayStart],
+  )
   const previousOrders = useMemo(
     () => orders.filter(o => !ACTIVE_STATUSES.includes(o.status_final) && isTodayOrFuture(o)),
     [orders, todayStart],

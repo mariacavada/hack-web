@@ -46,15 +46,23 @@ export default function ProductCard({ product, qty, onAdd, onRemove, onSetQty }:
       transition={{ duration: 0.18, ease: "easeOut" }}
       className="bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-md hover:border-gray-200 transition-[box-shadow,border-color] duration-200 flex flex-col overflow-hidden"
     >
-      {/* Emoji / image area */}
+      {/* Image / emoji area */}
       <div className="relative bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center h-32 select-none overflow-hidden">
-        <motion.span
-          className="text-5xl"
-          whileHover={{ scale: 1.14, rotate: -3 }}
-          transition={{ type: "spring", stiffness: 320, damping: 14 }}
-        >
-          {product.emoji ?? "🥤"}
-        </motion.span>
+        {product.imagen_url ? (
+          <img
+            src={product.imagen_url}
+            alt={product.nombre}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <motion.span
+            className="text-5xl"
+            whileHover={{ scale: 1.14, rotate: -3 }}
+            transition={{ type: "spring", stiffness: 320, damping: 14 }}
+          >
+            {product.emoji ?? "🥤"}
+          </motion.span>
+        )}
 
         <AnimatePresence>
           {qty > 0 && (

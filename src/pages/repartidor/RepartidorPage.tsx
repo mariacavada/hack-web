@@ -36,6 +36,7 @@ const ROUTE_STATUS_LABEL: Record<string, { label: string; color: string }> = {
   salio:      { label: 'Salió del CEDIS',  color: 'bg-orange-100 text-orange-700' },
   en_camino:  { label: 'En camino',        color: 'bg-orange-100 text-orange-700' },
   entregado:  { label: 'Entregado',        color: 'bg-green-100 text-green-700' },
+  finalizado: { label: 'Finalizado',       color: 'bg-green-100 text-green-700' },
   cancelado:  { label: 'Cancelado',        color: 'bg-gray-100 text-gray-500' },
 };
 
@@ -199,20 +200,23 @@ export default function RepartidorPage() {
     })),
   [todayOrders]);
 
-  // Keep route stop statuses in sync with the shared orders state from context
+  // Keep route stop statuses in sync with the shared orders state from context.
+  // Stops whose matching order is NOT today's are excluded.
   const syncedRouteStops = useMemo<RouteStop[]>(() => {
     if (!route?.stops) return [];
-    return route.stops.map(stop => {
+    const result: RouteStop[] = [];
+    for (const stop of route.stops) {
       const order = orders.find(o =>
         o.id_pedido === (stop.id_pedido ?? stop.order_id) || o._id === stop.order_id
       );
-      if (!order) return stop;
-      return {
+      if (order && !isToday(order)) continue;
+      result.push(order ? {
         ...stop,
         status:    order.status_final === 'Entregado' ? 'completada' : order.status_final,
         direccion: stop.direccion || order.direccion_entrega || '',
-      };
-    });
+      } : stop);
+    }
+    return result;
   }, [route?.stops, orders]);
 
   const mergedStops = useMemo(() => {
@@ -224,6 +228,20 @@ export default function RepartidorPage() {
     () => mergedStops.length > 0 ? mergedStops : orderStops,
     [mergedStops, orderStops],
   );
+
+  // ── Route finalization ────────────────────────────────────────────────────
+  const TERMINAL_STATUSES = new Set(['Entregado', 'Incompleto', 'Cancelado']);
+
+  const checkAndFinalizeRoute = (updatedId: string, updatedStatus: string) => {
+    const todayList = orders.filter(isToday);
+    if (todayList.length === 0) return;
+    const allDone = todayList.every(o =>
+      o._id === updatedId
+        ? TERMINAL_STATUSES.has(updatedStatus)
+        : TERMINAL_STATUSES.has(o.status_final)
+    );
+    if (allDone) setRoute(r => r ? { ...r, current_status: 'finalizado' } : r);
+  };
 
   // ── Status update ─────────────────────────────────────────────────────────
   const updateOrderStatus = async (
@@ -251,13 +269,7 @@ export default function RepartidorPage() {
           : normalizeStatus(status);
 
         ctxUpdateStatus(order._id, confirmed);
-
-        if (confirmed === 'Entregado') {
-          const allDone = orders
-            .filter(isToday)
-            .every(o => o._id === order._id ? true : o.status_final === 'Entregado');
-          if (allDone) setRoute(r => r ? { ...r, current_status: 'entregado' } : r);
-        }
+        checkAndFinalizeRoute(order._id, confirmed);
 
         // Background sync: confirm the DB reflects what we just set
         refreshSilent();
@@ -328,6 +340,7 @@ export default function RepartidorPage() {
           });
           if (statusRes.ok || statusRes.status >= 500) {
             ctxUpdateStatus(matchingOrder._id, 'Entregado');
+            checkAndFinalizeRoute(matchingOrder._id, 'Entregado');
             refreshSilent();
           }
         }
@@ -390,6 +403,7 @@ export default function RepartidorPage() {
         });
         if (statusRes.ok || statusRes.status >= 500) {
           ctxUpdateStatus(incidentOrder, 'Incompleto');
+          checkAndFinalizeRoute(incidentOrder, 'Incompleto');
           refreshSilent();
         }
       }
@@ -644,6 +658,20 @@ export default function RepartidorPage() {
                     className="w-full h-11 rounded-xl border border-red-200 text-sm font-medium text-red-500 hover:bg-red-50 transition-colors">
                     Reportar pedido faltante en carga
                   </button>
+                </div>
+              )}
+
+              {(routeStatus === 'finalizado' || routeStatus === 'entregado') && (
+                <div className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-xl px-4 py-4">
+                  <div className="w-9 h-9 bg-green-100 rounded-xl flex items-center justify-center shrink-0">
+                    <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-green-800">Ruta finalizada</p>
+                    <p className="text-xs text-green-600 mt-0.5">Todos los pedidos del día han sido procesados.</p>
+                  </div>
                 </div>
               )}
 
