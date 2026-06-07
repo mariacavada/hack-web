@@ -184,9 +184,8 @@ export default function AdminAnaliticasPage() {
                   ))}
                 </Pie>
                 <Tooltip
-                  formatter={(value: number, name: string) => [`${value} uds.`, name]}
-                  contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }}
-                />
+  formatter={(value, name) => [`${value} uds.`, name]}
+/>
                 <Legend
                   formatter={(value) => <span style={{ fontSize: 11, color: '#6b7280' }}>{value}</span>}
                 />
@@ -262,10 +261,9 @@ export default function AdminAnaliticasPage() {
               <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
               <XAxis dataKey="fecha" tick={{ fontSize: 11 }} />
               <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-              <Tooltip
-                contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }}
-                formatter={(v: number) => [`${v} pedidos`, 'Pedidos']}
-              />
+             <Tooltip
+  formatter={(v) => [`${v} pedidos`, 'Pedidos']}
+/>
               <Line
                 type="monotone"
                 dataKey="pedidos"
@@ -297,10 +295,9 @@ export default function AdminAnaliticasPage() {
                   label={{ value: 'horas restantes', position: 'insideBottomRight', offset: -5, fontSize: 10, fill: '#9ca3af' }}
                 />
                 <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={100} />
-                <Tooltip
-                  contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }}
-                  formatter={(v: number) => [`${v}h`, 'Horas restantes']}
-                />
+               <Tooltip
+  formatter={(v) => [`${v}h`, 'Horas restantes']}
+/>
                 <Bar dataKey="horas" name="Horas restantes" radius={[0, 4, 4, 0]}>
                   {stockRisk.map((entry, i) => (
                     <Cell
