@@ -114,7 +114,10 @@ export function useChatbot() {
           }),
         });
 
-        if (!res.ok) throw new Error("La solicitud al asistente falló");
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as { message?: string };
+          throw new Error(body.message || "La solicitud al asistente falló");
+        }
 
         const data = (await res.json()) as { answer: string; session_id: string };
         persistSession(data.session_id);
