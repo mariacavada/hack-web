@@ -159,11 +159,11 @@ export default function AdminAnaliticasPage() {
   /* ── Derived data ────────────────────────────────────────────────────────── */
 
   // Status bar — from stats.por_status (full DB aggregation, no pagination gaps)
+  const SHOWN_STATUSES = ['asignado', 'entregado', 'incompleto', 'cancelado'];
   const statusData = stats
-    ? Object.entries(stats.por_status)
-        .filter(([, v]) => v > 0)
-        .sort((a, b) => b[1] - a[1])
-        .map(([name, value]) => ({ name, value }))
+    ? SHOWN_STATUSES
+        .map(name => ({ name, value: stats.por_status[name] ?? 0 }))
+        .filter(({ value }) => value > 0)
     : [];
 
   // Pie — product-sales endpoint
