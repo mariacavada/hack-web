@@ -7,6 +7,7 @@ import UsuarioPage from './pages/usuario/UsuarioPage';
 import AdminPage from './pages/admin/AdminPage';
 import AdminHomePage from './pages/admin/AdminHomePage';
 import AdminAnaliticasPage from './pages/admin/AdminAnaliticasPage';
+import AdminUsuariosPage from './pages/admin/AdminUsuariosPage';
 import RepartidorPage from './pages/repartidor/RepartidorPage';
 import RepartidorHomePage from './pages/repartidor/RepartidorHomePage';
 import AdminLayout from './layouts/AdminLayout';
@@ -45,7 +46,7 @@ const App: React.FC = () => {
               <Route path="pedidos"      element={<AdminPage />} />
               <Route path="predicciones" element={<AdminPage />} />
               <Route path="analiticas"   element={<AdminAnaliticasPage />} />
-              <Route path="usuarios"     element={<AdminPage />} />
+              <Route path="usuarios"     element={<AdminUsuariosPage />} />
             </Route>
           </Route>
 
