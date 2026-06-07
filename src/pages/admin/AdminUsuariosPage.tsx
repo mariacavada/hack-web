@@ -3,17 +3,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 const API = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
 
-interface Stats {
-  total:          number;
-  hoy:            number;
-  activos:        number;
-  entregados:     number;
-  cancelados:     number;
-  nivel_servicio: number;
-  revenue_total:  number;
-  por_status:     Record<string, number>;
-}
-
 interface User {
   _id: string;
   nombre_negocio?: string;
@@ -297,7 +286,6 @@ export default function AdminUsuariosPage() {
   const [clientes,      setClientes]      = useState<User[]>([]);
   const [repartidores,  setRepartidores]  = useState<User[]>([]);
   const [orders,        setOrders]        = useState<Order[]>([]);
-  const [stats,         setStats]         = useState<Stats | null>(null);
   const [loading,       setLoading]       = useState(true);
   const [search,        setSearch]        = useState('');
   const [selected,      setSelected]      = useState<User | null>(null);
@@ -311,16 +299,14 @@ export default function AdminUsuariosPage() {
     Promise.all([
       fetch(`${API}/api/admin/users?limit=500`,   { headers: h }).then(r => r.ok ? r.json() : []),
       fetch(`${API}/api/admin/orders?limit=500`,  { headers: h }).then(r => r.ok ? r.json() : []),
-      fetch(`${API}/api/admin/stats`,             { headers: h }).then(r => r.ok ? r.json() : null),
     ])
-      .then(([u, ord, st]) => {
+      .then(([u, ord]) => {
         const raw: User[] = Array.isArray(u) ? u : u?.users ?? [];
         const seen = new Set<string>();
         const all = raw.filter(x => { if (seen.has(x._id)) return false; seen.add(x._id); return true; });
         setClientes(all.filter(x => x.role === 'customer' || x.rol === 'usuario' || x.rol === 'cliente'));
         setRepartidores(all.filter(x => x.role === 'driver' || x.role === 'repartidor' || x.rol === 'repartidor'));
         setOrders(Array.isArray(ord) ? ord : ord?.orders ?? []);
-        setStats(st ?? null);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
