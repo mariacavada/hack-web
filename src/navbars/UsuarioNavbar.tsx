@@ -73,14 +73,14 @@ const Navbar = ({ cartCount = 0 }: NavbarProps) => {
                     <motion.div
                       layoutId="activeNavbarItem"
                       transition={{ type: "spring", stiffness: 450, damping: 35 }}
-                      className="absolute inset-0 rounded-xl bg-brand-crimson/10 border border-brand-crimson/20"
+                      className="absolute inset-0 rounded-xl bg-gray-100 border border-gray-200"
                     />
                   )}
                   <span
                     className={`relative z-10 transition-colors duration-200 ${
                       isActive
-                        ? "text-brand-crimson"
-                        : "text-slate-700 hover:text-brand-crimson"
+                        ? "text-neutral-900 font-bold"
+                        : "text-slate-500 hover:text-neutral-900"
                     }`}
                   >
                     {item.name}
@@ -179,7 +179,7 @@ const Navbar = ({ cartCount = 0 }: NavbarProps) => {
                     whileTap={{ scale: 0.98 }}
                     className={`
                       rounded-xl px-4 py-3 text-sm font-medium transition-all
-                      ${isActive ? "bg-brand-crimson/10 text-brand-crimson" : "text-slate-700 hover:bg-slate-50"}
+                      ${isActive ? "bg-gray-100 text-neutral-900 font-semibold" : "text-slate-600 hover:bg-slate-50"}
                     `}
                   >
                     {item.name}

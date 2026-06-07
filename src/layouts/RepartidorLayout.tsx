@@ -1,14 +1,13 @@
 import React from 'react';
 import { Outlet } from 'react-router';
-import RepartidorSidebar from '../navbars/RepartidorSidebar';
+import RepartidorNavbar from '../navbars/RepartidorNavbar';
 
 const RepartidorLayout: React.FC = () => {
   return (
     <div className="min-h-screen bg-neutral-50/50">
-      <RepartidorSidebar />
-      {/* Margin left offsets the width of the fixed sidebar */}
-      <main className="ml-64 p-8 min-h-screen">
-        <div className="max-w-6.5xl mx-auto">
+      <RepartidorNavbar />
+      <main className="pt-20 px-4 pb-8 min-h-screen">
+        <div className="max-w-3xl mx-auto">
           <Outlet />
         </div>
       </main>

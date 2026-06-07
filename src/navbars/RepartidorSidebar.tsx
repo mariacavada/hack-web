@@ -1,10 +1,15 @@
 import React from 'react';
-import { Link, useLocation } from 'react-router';
+import { Link, useLocation, useNavigate } from 'react-router';
 import { LayoutDashboard, PackageOpen, Truck, Shield, User } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { useAuth } from '../auth/AuthContext';
 
 const RepartidorSidebar: React.FC = () => {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { logout, user } = useAuth();
+  const handleLogout = () => { logout(); navigate('/', { replace: true }); };
+  const initial = (user?.nombre ?? 'R')[0].toUpperCase();
   
   const menuItems = [
     { name: 'Inicio', path: '/repartidor', icon: <LayoutDashboard size={18} /> },
@@ -151,10 +156,10 @@ const RepartidorSidebar: React.FC = () => {
 
       {/* User profile minimal trigger */}
       <div className="border-t border-neutral-100 pt-4 px-2 flex items-center gap-3">
-        <div className="w-8 h-8 rounded-full bg-neutral-900 text-white flex items-center justify-center text-xs font-bold">A</div>
+        <div className="w-8 h-8 rounded-full bg-red-600 text-white flex items-center justify-center text-xs font-bold">{initial}</div>
         <div>
-          <p className="text-xs font-semibold text-neutral-800">Panel de Administrador</p>
-          <Link to="/" className="text-[10px] text-neutral-400 hover:underline">Cerrar Sesión</Link>
+          <p className="text-xs font-semibold text-neutral-800">{user?.nombre ?? 'Repartidor'}</p>
+          <button onClick={handleLogout} className="text-[10px] text-neutral-400 hover:underline">Cerrar Sesión</button>
         </div>
       </div>
     </aside>

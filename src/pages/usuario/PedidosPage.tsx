@@ -141,7 +141,7 @@ export default function PedidosPage() {
       {totalItems > 0 && (
         <div className="fixed bottom-4 left-4 right-4 z-30 sm:hidden">
           <button
-            onClick={() => navigate("/usuario/pedidos/checkout")}
+            onClick={() => navigate("/usuario/tienda/checkout")}
             className="w-full bg-red-600 text-white font-semibold py-3.5 rounded-lg shadow-lg flex items-center justify-between px-4 active:bg-red-700 transition-colors"
           >
             <div className="flex items-center gap-2">

@@ -5,13 +5,17 @@ import { ProtectedRoute } from './auth/ProtectedRoute';
 import LoginPage from './pages/LoginPage';
 import UsuarioPage from './pages/usuario/UsuarioPage';
 import AdminPage from './pages/admin/AdminPage';
+import AdminHomePage from './pages/admin/AdminHomePage';
 import RepartidorPage from './pages/repartidor/RepartidorPage';
+import RepartidorHomePage from './pages/repartidor/RepartidorHomePage';
 import AdminLayout from './layouts/AdminLayout';
 import RepartidorLayout from './layouts/RepartidorLayout';
 import UsuarioLayout from './layouts/UsuarioLayout';
 import PedidosPage from './pages/usuario/PedidosPage';
 import CheckoutPage from './pages/usuario/CheckoutPage';
 import MisPedidosPage from './pages/usuario/MisPedidos';
+import SeguirPage from './pages/usuario/SeguirPage';
+import PerfilPage from './pages/usuario/PerfilPage';
 
 const App: React.FC = () => {
   return (
@@ -28,25 +32,30 @@ const App: React.FC = () => {
               <Route path="tienda" element={<PedidosPage />} />
               <Route path="tienda/checkout" element={<CheckoutPage />} />
               <Route path="pedidos" element={<MisPedidosPage />} />
+              <Route path="seguir" element={<SeguirPage />} />
+              <Route path="perfil" element={<PerfilPage />} />
             </Route>
           </Route>
 
           {/* Admin */}
           <Route element={<ProtectedRoute allowedRole="admin" />}>
             <Route path="/admin" element={<AdminLayout />}>
-              <Route index element={<AdminPage />} />
-              <Route path="users"    element={<h2>Sub-page: Access Management</h2>} />
-              <Route path="alerts"   element={<h2>Sub-page: Active Stock Substitution Log</h2>} />
-              <Route path="settings" element={<h2>Sub-page: Control Rules</h2>} />
+              <Route index element={<AdminHomePage />} />
+              <Route path="pedidos"      element={<AdminPage />} />
+              <Route path="predicciones" element={<AdminPage />} />
+              <Route path="analiticas"   element={<AdminPage />} />
+              <Route path="usuarios"     element={<AdminPage />} />
             </Route>
           </Route>
 
           {/* Repartidor */}
           <Route element={<ProtectedRoute allowedRole="repartidor" />}>
             <Route path="/repartidor" element={<RepartidorLayout />}>
-              <Route index element={<RepartidorPage />} />
-              <Route path="mapa"    element={<h2>Sub-page: Live Route Navigation Map</h2>} />
-              <Route path="history" element={<h2>Sub-page: Past Deliveries Resolved</h2>} />
+              <Route index element={<RepartidorHomePage />} />
+              <Route path="pedidos"     element={<RepartidorPage />} />
+              <Route path="ruta"        element={<RepartidorPage />} />
+              <Route path="incidencias" element={<RepartidorPage />} />
+              <Route path="perfil"      element={<RepartidorPage />} />
             </Route>
           </Route>
 

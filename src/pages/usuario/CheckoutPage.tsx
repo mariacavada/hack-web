@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { mockProducts } from "./MockProducts";
 import { useCart } from "./CartContext";
 
-const API_BASE = "https://hack-back.up.railway.app";
+const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
 
 function ConfirmModal({ onClose }: { onClose: () => void }) {
   return (
@@ -53,9 +53,9 @@ export default function CheckoutPage() {
     setLoading(true);
     setError(null);
 
-    const token = localStorage.getItem("token_usuario") || localStorage.getItem("token");
+    const token = localStorage.getItem("or_token");
     if (!token) {
-      setError("No hay una sesión activa de usuario. Por favor inicia sesión.");
+      setError("No hay una sesión activa. Por favor inicia sesión.");
       setLoading(false);
       return;
     }

@@ -66,9 +66,10 @@ const navigate = useNavigate();
       setError(null);
       try {
         // Replace with your real token strategy (e.g., localStorage, Context, cookie)
-        const token = localStorage.getItem('token_usuario') || ''; 
-        
-        const response = await fetch('https://hack-back.up.railway.app/api/orders/my', {
+        const token = localStorage.getItem('or_token') || '';
+
+        const API = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
+        const response = await fetch(`${API}/api/orders/my`, {
           method: 'GET',
           headers: {
             'Authorization': `Bearer ${token}`,
