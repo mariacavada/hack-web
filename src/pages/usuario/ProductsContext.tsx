@@ -22,15 +22,15 @@ export function ProductsProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const token = localStorage.getItem("or_token");
-    fetch(`${API_BASE}/api/ai/products`, {
+    fetch(`${API_BASE}/api/customer/products`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     })
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       })
-      .then((data: { sku: string; nombre: string; precio_unitario: number; categoria: string }[]) => {
-        setProducts(data.map((p) => ({ sku: p.sku, nombre: p.nombre, precio: p.precio_unitario, categoria: p.categoria })));
+      .then((data: { sku: string; nombre: string; precio: number; categoria: string; imagen_url?: string | null }[]) => {
+        setProducts(data.map((p) => ({ sku: p.sku, nombre: p.nombre, precio: p.precio, categoria: p.categoria, imagen_url: p.imagen_url ?? null })));
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));

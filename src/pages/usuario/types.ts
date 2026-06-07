@@ -3,6 +3,7 @@ export interface Product {
   nombre: string;
   categoria: string;
   precio: number;
+  imagen_url?: string | null;
   emoji?: string;
   descripcion?: string;
 }
