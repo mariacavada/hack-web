@@ -33,6 +33,27 @@ interface Order {
 }
 interface Notification { _id: string; leida: boolean; mensaje?: string; tipo?: string; }
 
+const quickLinks = [
+  {
+    path: '/usuario/pedidos',
+    label: 'Mis pedidos',
+    sub: 'Historial completo',
+    icon: (
+      <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+    ),
+    color: 'bg-violet-50 text-violet-600',
+  },
+  {
+    path: '/usuario/seguir',
+    label: 'Seguimiento',
+    sub: '¿Dónde está mi pedido?',
+    icon: (
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0M3 7h18M3 7l2-4h14l2 4M3 7v10h1m15 0h1V7" />
+    ),
+    color: 'bg-orange-50 text-orange-600',
+  },
+];
+
 export default function UsuarioPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -69,7 +90,7 @@ export default function UsuarioPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-2xl mx-auto px-4 py-8 space-y-5">
+      <div className="max-w-2xl mx-auto px-4 py-8 space-y-4">
 
         {/* Greeting */}
         <div className="flex items-start justify-between">
@@ -78,45 +99,51 @@ export default function UsuarioPage() {
             <h1 className="text-2xl font-bold text-gray-900">{firstName}</h1>
           </div>
           {unread > 0 && (
-            <div className="relative mt-1">
-              <div className="w-9 h-9 bg-white border border-gray-200 rounded-full flex items-center justify-center">
-                <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-                </svg>
-              </div>
-              <span className="absolute -top-1 -right-1 w-4 h-4 bg-[#E61A27] text-white text-[10px] font-bold rounded-full flex items-center justify-center">{unread}</span>
-            </div>
+            <button
+              onClick={() => navigate('/usuario/perfil')}
+              className="relative mt-1 w-10 h-10 bg-white border border-gray-200 rounded-full flex items-center justify-center hover:border-gray-300 transition-colors shadow-sm"
+            >
+              <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+              </svg>
+              <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-600 text-white text-[10px] font-extrabold rounded-full flex items-center justify-center border-2 border-white tabular-nums">
+                {unread}
+              </span>
+            </button>
           )}
         </div>
 
         {/* Active order card */}
         {loading ? (
-          <div className="bg-white rounded-2xl border border-gray-200 h-40 animate-pulse" />
+          <div className="bg-white rounded-2xl border border-gray-100 h-40 animate-pulse" />
         ) : isActive ? (
           <motion.button
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
+            whileHover={{ y: -2 }}
+            whileTap={{ scale: 0.99 }}
             onClick={() => navigate('/usuario/seguir')}
             className="w-full bg-[#E61A27] rounded-2xl p-5 text-white shadow-lg text-left"
           >
             <div className="flex items-center justify-between mb-1">
-              <span className="text-xs font-medium bg-white/20 px-2.5 py-1 rounded-full">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-white/70">Pedido activo</span>
+              <span className="text-xs font-mono font-semibold bg-white/15 px-2.5 py-1 rounded-full">
                 {activeOrder!.id_pedido}
               </span>
-              <svg className="w-6 h-6 opacity-90" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0M3 7h18M3 7l2-4h14l2 4M3 7v10h1m15 0h1V7" />
-              </svg>
             </div>
-            <h2 className="text-xl font-bold mt-3">{STATUS_LABEL[activeOrder!.status_final]}</h2>
-            <p className="text-white/80 text-sm mt-1">
+            <h2 className="text-xl font-bold mt-2">{STATUS_LABEL[activeOrder!.status_final]}</h2>
+            <p className="text-white/75 text-sm mt-1">
               {activeOrder!.items?.length ?? 0} productos · ${activeOrder!.total?.toLocaleString('es-MX')} MXN
             </p>
             <div className="flex gap-1 mt-4">
               {TIMELINE.map((_, i) => (
-                <div key={i} className={`flex-1 h-1.5 rounded-full ${i <= step ? 'bg-white' : 'bg-white/30'}`} />
+                <div
+                  key={i}
+                  className={`flex-1 h-1.5 rounded-full transition-all duration-500 ${i <= step ? 'bg-white' : 'bg-white/25'}`}
+                />
               ))}
             </div>
-            <p className="text-white/70 text-xs mt-2">Ver seguimiento →</p>
+            <p className="text-white/60 text-xs mt-2 font-medium">Ver seguimiento →</p>
           </motion.button>
         ) : activeOrder ? (
           <motion.div
@@ -124,7 +151,7 @@ export default function UsuarioPage() {
             animate={{ opacity: 1, y: 0 }}
             className="bg-white rounded-2xl border border-green-200 p-5 flex items-center gap-4"
           >
-            <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center shrink-0">
+            <div className="w-12 h-12 bg-green-50 rounded-xl flex items-center justify-center shrink-0">
               <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
               </svg>
@@ -138,9 +165,14 @@ export default function UsuarioPage() {
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-white rounded-2xl border border-dashed border-gray-300 p-6 text-center"
+            className="bg-white rounded-2xl border border-dashed border-gray-200 p-8 text-center"
           >
-            <p className="text-gray-500 text-sm">No tienes pedidos activos.</p>
+            <div className="w-12 h-12 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
+              <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+              </svg>
+            </div>
+            <p className="text-gray-900 font-semibold text-sm">Sin pedidos activos</p>
             <p className="text-gray-400 text-xs mt-1">¡Haz tu primer pedido!</p>
           </motion.div>
         )}
@@ -150,7 +182,7 @@ export default function UsuarioPage() {
           whileHover={{ y: -1 }}
           whileTap={{ scale: 0.99 }}
           onClick={() => navigate('/usuario/tienda')}
-          className="w-full bg-[#E61A27] hover:bg-[#B31217] text-white font-bold py-4 rounded-2xl shadow-sm transition-colors flex items-center justify-center gap-2 text-base"
+          className="w-full bg-[#E61A27] hover:bg-[#C9141A] text-white font-bold py-4 rounded-2xl shadow-sm transition-colors flex items-center justify-center gap-2 text-base"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -160,31 +192,23 @@ export default function UsuarioPage() {
 
         {/* Quick links */}
         <div className="grid grid-cols-2 gap-3">
-          <button
-            onClick={() => navigate('/usuario/pedidos')}
-            className="bg-white border border-gray-200 rounded-2xl p-4 text-left hover:border-gray-300 transition-colors"
-          >
-            <div className="w-9 h-9 bg-gray-100 rounded-xl flex items-center justify-center mb-3">
-              <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-              </svg>
-            </div>
-            <p className="text-sm font-semibold text-gray-900">Mis pedidos</p>
-            <p className="text-xs text-gray-400 mt-0.5">Historial completo</p>
-          </button>
-
-          <button
-            onClick={() => navigate('/usuario/seguir')}
-            className="bg-white border border-gray-200 rounded-2xl p-4 text-left hover:border-gray-300 transition-colors"
-          >
-            <div className="w-9 h-9 bg-gray-100 rounded-xl flex items-center justify-center mb-3">
-              <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0M3 7h18M3 7l2-4h14l2 4M3 7v10h1m15 0h1V7" />
-              </svg>
-            </div>
-            <p className="text-sm font-semibold text-gray-900">Seguimiento</p>
-            <p className="text-xs text-gray-400 mt-0.5">¿Dónde está mi pedido?</p>
-          </button>
+          {quickLinks.map(item => (
+            <motion.button
+              key={item.path}
+              whileHover={{ y: -2 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => navigate(item.path)}
+              className="bg-white border border-gray-100 rounded-2xl p-4 text-left hover:border-gray-200 hover:shadow-sm transition-all"
+            >
+              <div className={`w-9 h-9 ${item.color} rounded-xl flex items-center justify-center mb-3`}>
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  {item.icon}
+                </svg>
+              </div>
+              <p className="text-sm font-semibold text-gray-900">{item.label}</p>
+              <p className="text-xs text-gray-400 mt-0.5">{item.sub}</p>
+            </motion.button>
+          ))}
         </div>
       </div>
     </div>
