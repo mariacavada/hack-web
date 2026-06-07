@@ -139,7 +139,7 @@ export default function PedidosPage() {
 
       {/* Floating Sticky Mobile Order Status Bar */}
       {totalItems > 0 && (
-        <div className="fixed bottom-4 left-4 right-4 z-30 sm:hidden">
+        <div className="fixed bottom-20 left-4 right-4 z-[10000] sm:hidden">
           <button
             onClick={() => navigate("/usuario/tienda/checkout")}
             className="w-full bg-red-600 text-white font-semibold py-3.5 rounded-lg shadow-lg flex items-center justify-between px-4 active:bg-red-700 transition-colors"
