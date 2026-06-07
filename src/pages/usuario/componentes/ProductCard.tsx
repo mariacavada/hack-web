@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { Product } from "../types";
 
@@ -7,15 +7,36 @@ interface Props {
   qty: number;
   onAdd: (product: Product) => void;
   onRemove: (sku: string) => void;
+  onSetQty?: (sku: string, qty: number) => void;
 }
 
-export default function ProductCard({ product, qty, onAdd, onRemove }: Props) {
-  const [adding, setAdding] = useState(false);
+export default function ProductCard({ product, qty, onAdd, onRemove, onSetQty }: Props) {
+  const [adding, setAdding]     = useState(false);
+  const [inputVal, setInputVal] = useState(String(qty));
+
+  // Keep local input in sync when parent qty changes
+  useEffect(() => { setInputVal(String(qty)); }, [qty]);
 
   const handleAdd = () => {
     setAdding(true);
     onAdd(product);
     setTimeout(() => setAdding(false), 180);
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Only allow digit characters
+    if (/^\d*$/.test(e.target.value)) setInputVal(e.target.value);
+  };
+
+  const commitInput = () => {
+    const n = parseInt(inputVal, 10);
+    if (!n || n < 1 || !isFinite(n)) {
+      setInputVal(String(qty)); // reset to valid current value
+      return;
+    }
+    const capped = Math.min(n, 999);
+    setInputVal(String(capped));
+    if (capped !== qty) onSetQty?.(product.sku, capped);
   };
 
   return (
@@ -63,9 +84,7 @@ export default function ProductCard({ product, qty, onAdd, onRemove }: Props) {
         <div className="flex items-center justify-between mt-auto gap-2">
           {/* Price */}
           <div className="leading-none">
-            <span className="text-base font-extrabold text-gray-900 tabular-nums">
-              ${product.precio}
-            </span>
+            <span className="text-base font-extrabold text-gray-900 tabular-nums">${product.precio}</span>
             <span className="text-[10px] font-semibold text-gray-400 ml-0.5">MXN</span>
           </div>
 
@@ -74,9 +93,7 @@ export default function ProductCard({ product, qty, onAdd, onRemove }: Props) {
             <motion.button
               whileTap={{ scale: 0.82 }}
               onClick={handleAdd}
-              className={`w-8 h-8 rounded-full bg-red-600 text-white flex items-center justify-center shadow-md hover:bg-red-700 active:bg-red-800 transition-colors text-xl font-light leading-none shrink-0 ${
-                adding ? "scale-90" : "scale-100"
-              }`}
+              className={`w-8 h-8 rounded-full bg-red-600 text-white flex items-center justify-center shadow-md hover:bg-red-700 active:bg-red-800 transition-colors text-xl font-light leading-none shrink-0 ${adding ? "scale-90" : "scale-100"}`}
             >
               +
             </motion.button>
@@ -89,9 +106,18 @@ export default function ProductCard({ product, qty, onAdd, onRemove }: Props) {
               >
                 −
               </motion.button>
-              <span className="text-sm font-bold text-gray-900 w-5 text-center tabular-nums">
-                {qty}
-              </span>
+
+              <input
+                type="text"
+                inputMode="numeric"
+                value={inputVal}
+                onChange={handleInputChange}
+                onBlur={commitInput}
+                onKeyDown={e => e.key === 'Enter' && commitInput()}
+                className="w-8 text-sm font-bold text-gray-900 text-center tabular-nums bg-transparent border-b-2 border-gray-200 focus:border-red-500 focus:outline-none transition-colors"
+                aria-label="Cantidad"
+              />
+
               <motion.button
                 whileTap={{ scale: 0.82 }}
                 onClick={handleAdd}

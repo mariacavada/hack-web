@@ -8,7 +8,7 @@ import { useCart } from "./CartContext";
 
 export default function PedidosPage() {
   const navigate = useNavigate();
-  const { cart, add, remove, totalItems } = useCart();
+  const { cart, add, remove, changeQty, totalItems } = useCart();
 
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState("Todos");
@@ -60,7 +60,7 @@ export default function PedidosPage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Buscar por marca, sabor o producto..."
-                className="w-full bg-gray-50 border border-gray-300 rounded-md pl-9 pr-4 py-1.5 text-sm text-gray-900 placeholder-gray-400 outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 focus:bg-white transition-all"
+                className="w-full bg-gray-50 border border-gray-300 rounded-2xl pl-9 pr-4 py-1.5 text-sm text-gray-900 placeholder-gray-400 outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 focus:bg-white transition-all"
               />
             </div>
           </div>
@@ -71,7 +71,7 @@ export default function PedidosPage() {
               <button
                 key={cat}
                 onClick={() => setActiveCategory(cat)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded border text-xs font-medium whitespace-nowrap transition-all flex-shrink-0 ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium whitespace-nowrap transition-all flex-shrink-0 ${
                   activeCategory === cat
                     ? "bg-red-600 text-white border-red-600 font-semibold shadow-sm"
                     : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50 hover:text-gray-900"
@@ -93,7 +93,7 @@ export default function PedidosPage() {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
-              className="text-center py-20 bg-white border border-gray-200 rounded-lg shadow-sm"
+              className="text-center py-20 bg-white border border-gray-200 rounded-2xl shadow-sm"
             >
               <svg className="mx-auto h-12 w-12 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -125,6 +125,7 @@ export default function PedidosPage() {
                         qty={cart[product.sku] ?? 0}
                         onAdd={add}
                         onRemove={remove}
+                        onSetQty={(sku, newQty) => changeQty(sku, newQty - (cart[sku] ?? 0))}
                       />
                     ))}
                   </div>
@@ -142,10 +143,10 @@ export default function PedidosPage() {
         <div className="fixed bottom-20 left-4 right-4 z-[10000] sm:hidden">
           <button
             onClick={() => navigate("/usuario/tienda/checkout")}
-            className="w-full bg-red-600 text-white font-semibold py-3.5 rounded-lg shadow-lg flex items-center justify-between px-4 active:bg-red-700 transition-colors"
+            className="w-full bg-red-600 text-white font-semibold py-3.5 rounded-2xl shadow-lg flex items-center justify-between px-4 active:bg-red-700 transition-colors"
           >
             <div className="flex items-center gap-2">
-              <span className="bg-red-700 text-xs font-mono font-bold px-2 py-0.5 rounded-md">
+              <span className="bg-red-700 text-xs font-mono font-bold px-2 py-0.5 rounded-full">
                 {totalItems}
               </span>
               <span className="text-sm font-medium">Ver mi pedido</span>
