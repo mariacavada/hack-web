@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'framer-motion';
-import RouteMap from './RouteMap';
+import RouteMap, { type CedisInfo, type Stop as RouteStop } from './RouteMap';
 import { useAuth } from '../../auth/AuthContext';
 
 const REP_PATH_TAB: Record<string, 'pedidos' | 'ruta' | 'incidencias' | 'perfil'> = {
@@ -23,21 +23,23 @@ interface AssignedOrder {
   total?: number;
 }
 
-interface RouteStop {
-  order_id: string;
-  id_pedido?: string;
-  cliente?: string;
-  direccion?: string;
-  status?: string;
-  eta?: string;
-  stop_number?: number;
-}
 
 interface Route {
   _id?: string;
   cedis_id?: string;
-  status?: string;
+  current_status?: string;
+  loaded_at?: string;
+  departed_at?: string;
+  finished_at?: string;
   stops?: RouteStop[];
+}
+
+interface DriverProfile {
+  calificacion?: number;
+  total_entregas?: number;
+  tiempo_promedio?: number;
+  area?: string;
+  zona?: string;
 }
 
 const STATUS_BADGE: Record<string, string> = {
@@ -48,30 +50,35 @@ const STATUS_BADGE: Record<string, string> = {
   'Entregado':      'bg-green-100 text-green-700',
 };
 
-const INCIDENT_TYPES = [
-  { key: 'producto_faltante',   label: 'Producto faltante' },
-  { key: 'producto_incorrecto', label: 'Producto incorrecto' },
-  { key: 'cliente_ausente',     label: 'Cliente ausente' },
-  { key: 'accidente',           label: 'Accidente / vehículo' },
-];
+const ROUTE_STATUS_LABEL: Record<string, { label: string; color: string }> = {
+  programado: { label: 'Programado',       color: 'bg-blue-100 text-blue-700' },
+  cargando:   { label: 'Cargando camión',  color: 'bg-yellow-100 text-yellow-700' },
+  faltante:   { label: 'Faltante',         color: 'bg-red-100 text-red-700' },
+  salio:      { label: 'Salió del CEDIS',  color: 'bg-orange-100 text-orange-700' },
+  en_camino:  { label: 'En camino',        color: 'bg-orange-100 text-orange-700' },
+  entregado:  { label: 'Entregado',        color: 'bg-green-100 text-green-700' },
+  cancelado:  { label: 'Cancelado',        color: 'bg-gray-100 text-gray-500' },
+};
 
-interface DriverProfile {
-  calificacion?: number;
-  total_entregas?: number;
-  tiempo_promedio?: number;
-  area?: string;
-  zona?: string;
-}
+const INCIDENT_TYPES = [
+  { key: 'producto_faltante',    label: 'Producto faltante' },
+  { key: 'producto_danado',      label: 'Producto dañado' },
+  { key: 'cliente_ausente',      label: 'Cliente ausente' },
+  { key: 'direccion_incorrecta', label: 'Dirección incorrecta' },
+  { key: 'otro',                 label: 'Otro' },
+];
 
 export default function RepartidorPage() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [orders, setOrders] = useState<AssignedOrder[]>([]);
-  const [route, setRoute] = useState<Route | null>(null);
-  const [profile, setProfile] = useState<DriverProfile | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'pedidos' | 'ruta' | 'incidencias' | 'perfil'>(
+
+  const [orders, setOrders]               = useState<AssignedOrder[]>([]);
+  const [route, setRoute]                 = useState<Route | null>(null);
+  const [cedisLocation, setCedisLocation] = useState<CedisInfo | null>(null);
+  const [profile, setProfile]             = useState<DriverProfile | null>(null);
+  const [loading, setLoading]             = useState(true);
+  const [activeTab, setActiveTab]         = useState<'pedidos' | 'ruta' | 'incidencias' | 'perfil'>(
     REP_PATH_TAB[location.pathname] ?? 'pedidos'
   );
 
@@ -81,32 +88,63 @@ export default function RepartidorPage() {
 
   const handleLogout = () => { logout(); navigate('/', { replace: true }); };
 
+  // Incident form state
   const [incidentOrder, setIncidentOrder] = useState('');
-  const [incidentType, setIncidentType] = useState('producto_faltante');
-  const [incidentDesc, setIncidentDesc] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [incidentDone, setIncidentDone] = useState(false);
-  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [incidentType, setIncidentType]   = useState('producto_faltante');
+  const [incidentDesc, setIncidentDesc]   = useState('');
+  const [submitting, setSubmitting]       = useState(false);
+  const [incidentDone, setIncidentDone]   = useState(false);
+
+  // Route action state
+  const [routeActionLoading, setRouteActionLoading] = useState(false);
+  const [completingStop, setCompletingStop]         = useState<number | null>(null);
+  const [updatingId, setUpdatingId]                 = useState<string | null>(null);
+
+  // Missing items form (route-level)
+  const [showMissingForm, setShowMissingForm] = useState(false);
+  const [missingNotes, setMissingNotes]       = useState('');
 
   const token = localStorage.getItem('or_token') ?? '';
   const h = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 
   useEffect(() => {
     Promise.all([
-      fetch(`${API}/api/driver/orders`, { headers: h }).then(r => r.ok ? r.json() : []),
+      fetch(`${API}/api/driver/orders`,      { headers: h }).then(r => r.ok ? r.json() : []),
       fetch(`${API}/api/driver/route/today`, { headers: h }).then(r => r.ok ? r.json() : null),
-      fetch(`${API}/api/driver/profile`, { headers: h }).then(r => r.ok ? r.json() : null),
+      fetch(`${API}/api/driver/profile`,     { headers: h }).then(r => r.ok ? r.json() : null),
+      fetch(`${API}/api/map/overview`,       { headers: h }).then(r => r.ok ? r.json() : null),
     ])
-      .then(([o, r, p]) => {
-        setOrders(Array.isArray(o) ? o : o?.orders ?? []);
-        setRoute(r && typeof r === 'object' ? r : null);
+      .then(([o, r, p, mapData]) => {
+        const fetchedOrders: AssignedOrder[] = Array.isArray(o) ? o : o?.orders ?? [];
+        const fetchedRoute: Route | null     = r && typeof r === 'object' ? r : null;
+
+        setOrders(fetchedOrders);
+        setRoute(fetchedRoute);
         setProfile(p && typeof p === 'object' ? p : null);
+
+        // Match CEDIS from map overview to the driver's route
+        if (mapData?.cedis?.length) {
+          const allCedis: any[] = mapData.cedis;
+          let match = fetchedRoute?.cedis_id
+            ? allCedis.find(c => c.cedis_id === fetchedRoute.cedis_id)
+            : null;
+          if (!match) match = allCedis[0];
+          if (match?.ubicacion) {
+            setCedisLocation({
+              lat: match.ubicacion.lat,
+              lng: match.ubicacion.lng,
+              nombre: match.nombre ?? 'CEDIS',
+            });
+          }
+        }
       })
       .catch(() => {})
       .finally(() => setLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const updateStatus = async (orderId: string, status: 'en_camino' | 'entregado') => {
+  // ── Order-level status update ──────────────────────────────────────────────
+  const updateOrderStatus = async (orderId: string, status: 'en_camino' | 'entregado') => {
     setUpdatingId(orderId);
     try {
       const res = await fetch(`${API}/api/driver/orders/${orderId}/status`, {
@@ -123,6 +161,91 @@ export default function RepartidorPage() {
     }
   };
 
+  // ── Route lifecycle actions ────────────────────────────────────────────────
+  const handleLoad = async () => {
+    if (!route?._id) return;
+    setRouteActionLoading(true);
+    try {
+      const res = await fetch(`${API}/api/routes/${route._id}/load`, { method: 'PATCH', headers: h });
+      if (res.ok) setRoute(prev => prev ? { ...prev, current_status: 'cargando' } : prev);
+    } finally {
+      setRouteActionLoading(false);
+    }
+  };
+
+  const handleDepart = async () => {
+    if (!route?._id) return;
+    setRouteActionLoading(true);
+    try {
+      const res = await fetch(`${API}/api/routes/${route._id}/depart`, { method: 'PATCH', headers: h });
+      if (res.ok) setRoute(prev => prev ? { ...prev, current_status: 'salio' } : prev);
+    } finally {
+      setRouteActionLoading(false);
+    }
+  };
+
+  const handleCompleteStop = async (stopIndex: number) => {
+    if (!route?._id) return;
+    const stop = route.stops?.[stopIndex];
+    const stopNum = stop?.stop_number ?? stopIndex + 1;
+    setCompletingStop(stopIndex);
+    try {
+      const res = await fetch(`${API}/api/driver/route/${route._id}/stop/${stopNum}/complete`, {
+        method: 'PATCH',
+        headers: h,
+      });
+      if (res.ok) {
+        setRoute(prev => {
+          if (!prev?.stops) return prev;
+          const stops = prev.stops.map((s, i) =>
+            i === stopIndex ? { ...s, status: 'completada' } : s
+          );
+          return { ...prev, stops };
+        });
+      }
+    } finally {
+      setCompletingStop(null);
+    }
+  };
+
+  const handleMissingRoute = async () => {
+    if (!route?._id || !missingNotes.trim()) return;
+    setRouteActionLoading(true);
+    try {
+      const res = await fetch(`${API}/api/routes/${route._id}/missing`, {
+        method: 'PATCH',
+        headers: h,
+        body: JSON.stringify({ notes: missingNotes }),
+      });
+      if (res.ok) {
+        setRoute(prev => prev ? { ...prev, current_status: 'faltante' } : prev);
+        setMissingNotes('');
+        setShowMissingForm(false);
+      }
+    } finally {
+      setRouteActionLoading(false);
+    }
+  };
+
+  // Start route via Gemini (when no route exists yet)
+  const startRoute = async () => {
+    setRouteActionLoading(true);
+    try {
+      const res = await fetch(`${API}/api/driver/route/start`, {
+        method: 'POST',
+        headers: h,
+        body: JSON.stringify({}),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setRoute(data?.route ?? data?.ruta ?? data);
+      }
+    } finally {
+      setRouteActionLoading(false);
+    }
+  };
+
+  // ── Incident submission ────────────────────────────────────────────────────
   const submitIncident = async () => {
     if (!incidentOrder || !incidentDesc.trim()) return;
     setSubmitting(true);
@@ -140,18 +263,6 @@ export default function RepartidorPage() {
     }
   };
 
-  const startRoute = async () => {
-    const res = await fetch(`${API}/api/driver/route/start`, {
-      method: 'POST',
-      headers: h,
-      body: JSON.stringify({ cedis_id: '3012' }),
-    });
-    if (res.ok) {
-      const r = await res.json();
-      setRoute(r?.route ?? r);
-    }
-  };
-
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -161,11 +272,13 @@ export default function RepartidorPage() {
   }
 
   const deliveredOrders = orders.filter(o => o.status_final === 'Entregado');
+  const routeStatus     = route?.current_status ?? 'programado';
+  const routeStatusMeta = ROUTE_STATUS_LABEL[routeStatus];
 
   return (
     <div className="space-y-4">
 
-      {/* ── PEDIDOS ASIGNADOS ─────────────────────────────────────────── */}
+      {/* ── PEDIDOS ASIGNADOS ──────────────────────────────────────────────── */}
       {activeTab === 'pedidos' && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-3">
           {orders.length === 0 ? (
@@ -179,12 +292,11 @@ export default function RepartidorPage() {
               <p className="text-gray-400 text-xs mt-1">Los pedidos aparecerán aquí cuando sean asignados.</p>
             </div>
           ) : orders.map(o => {
-            const address = o.direccion_entrega ?? o.usuario?.direccion;
+            const address   = o.direccion_entrega ?? o.usuario?.direccion;
             const isUpdating = updatingId === o._id;
 
             return (
               <div key={o._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-                {/* Card header: status + ID + amount */}
                 <div className="flex items-center justify-between px-4 pt-4 pb-3">
                   <div className="flex items-center gap-2">
                     <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${STATUS_BADGE[o.status_final] ?? 'bg-gray-100 text-gray-600'}`}>
@@ -197,7 +309,6 @@ export default function RepartidorPage() {
                   )}
                 </div>
 
-                {/* Primary info: address */}
                 {address && (
                   <div className="px-4 pb-3 flex items-start gap-2">
                     <svg className="w-4 h-4 text-gray-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -207,7 +318,6 @@ export default function RepartidorPage() {
                   </div>
                 )}
 
-                {/* Customer */}
                 {o.usuario?.nombre && (
                   <div className="px-4 pb-3 flex items-center gap-2">
                     <svg className="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -217,7 +327,6 @@ export default function RepartidorPage() {
                   </div>
                 )}
 
-                {/* Items */}
                 {(o.items ?? []).length > 0 && (
                   <div className="mx-4 mb-3 bg-gray-50 rounded-xl p-3 space-y-1">
                     {o.items!.slice(0, 3).map((item, i) => (
@@ -226,17 +335,16 @@ export default function RepartidorPage() {
                         <span className="font-mono shrink-0 text-gray-400">×{item.cantidad}</span>
                       </div>
                     ))}
-                    {(o.items!.length > 3) && (
+                    {o.items!.length > 3 && (
                       <p className="text-xs text-gray-400">+{o.items!.length - 3} más</p>
                     )}
                   </div>
                 )}
 
-                {/* Action buttons — large, thumb-friendly */}
                 <div className="px-4 pb-4 flex flex-col gap-2">
                   {o.status_final === 'Confirmado' && (
                     <button
-                      onClick={() => updateStatus(o._id, 'en_camino')}
+                      onClick={() => updateOrderStatus(o._id, 'en_camino')}
                       disabled={isUpdating}
                       className="w-full h-14 rounded-xl bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white font-bold text-base transition-colors flex items-center justify-center gap-2 shadow-sm"
                     >
@@ -254,7 +362,7 @@ export default function RepartidorPage() {
                   )}
                   {o.status_final === 'En camino' && (
                     <button
-                      onClick={() => updateStatus(o._id, 'entregado')}
+                      onClick={() => updateOrderStatus(o._id, 'entregado')}
                       disabled={isUpdating}
                       className="w-full h-14 rounded-xl bg-green-600 hover:bg-green-700 disabled:opacity-60 text-white font-bold text-base transition-colors flex items-center justify-center gap-2 shadow-sm"
                     >
@@ -283,12 +391,26 @@ export default function RepartidorPage() {
         </motion.div>
       )}
 
-      {/* ── RUTA ─────────────────────────────────────────────────────── */}
+      {/* ── RUTA ──────────────────────────────────────────────────────────── */}
       {activeTab === 'ruta' && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
-          <RouteMap stops={route?.stops ?? []} />
+
+          {/* Map + stop list */}
+          <RouteMap
+            stops={route?.stops ?? []}
+            cedis={cedisLocation}
+            canComplete={['salio', 'en_camino'].includes(routeStatus)}
+            completingStop={completingStop}
+            onCompleteStop={handleCompleteStop}
+            onMissingStop={(_, orderId) => {
+              setActiveTab('incidencias');
+              if (orderId) setIncidentOrder(orderId);
+              setIncidentType('producto_faltante');
+            }}
+          />
 
           {!route ? (
+            /* No route yet */
             <div className="bg-white rounded-2xl border border-dashed border-gray-200 p-10 text-center space-y-4">
               <div className="w-12 h-12 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto">
                 <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
@@ -297,53 +419,117 @@ export default function RepartidorPage() {
               </div>
               <div>
                 <p className="text-gray-900 font-semibold text-sm">Sin ruta activa</p>
-                <p className="text-gray-400 text-xs mt-1">Inicia tu ruta del día para ver las paradas.</p>
+                <p className="text-gray-400 text-xs mt-1">Inicia tu ruta del día para ver las paradas optimizadas.</p>
               </div>
               <button
                 onClick={startRoute}
-                className="bg-[#E61A27] text-white text-sm font-bold px-6 py-3 rounded-xl hover:bg-[#B31217] transition-colors"
+                disabled={routeActionLoading}
+                className="bg-[#E61A27] text-white text-sm font-bold px-6 py-3 rounded-xl hover:bg-[#B31217] disabled:opacity-60 transition-colors flex items-center gap-2 mx-auto"
               >
+                {routeActionLoading
+                  ? <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                  : null}
                 Iniciar ruta del día
               </button>
             </div>
           ) : (
-            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-base font-bold text-gray-900">Paradas de hoy</h2>
-                {route.status && (
-                  <span className="text-xs font-semibold bg-green-100 text-green-700 px-2.5 py-1 rounded-full capitalize">{route.status}</span>
+            <>
+              {/* Route status + lifecycle actions */}
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-base font-bold text-gray-900">Estado de la ruta</h2>
+                  {routeStatusMeta && (
+                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${routeStatusMeta.color}`}>
+                      {routeStatusMeta.label}
+                    </span>
+                  )}
+                </div>
+
+                {/* Action button based on current status */}
+                {routeStatus === 'programado' && (
+                  <button
+                    onClick={handleLoad}
+                    disabled={routeActionLoading}
+                    className="w-full h-14 rounded-xl bg-yellow-500 hover:bg-yellow-600 disabled:opacity-60 text-white font-bold text-base transition-colors flex items-center justify-center gap-2 shadow-sm"
+                  >
+                    {routeActionLoading ? (
+                      <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                    ) : (
+                      <>
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                        </svg>
+                        Comenzar carga del camión
+                      </>
+                    )}
+                  </button>
                 )}
+
+                {routeStatus === 'cargando' && (
+                  <div className="space-y-2">
+                    <button
+                      onClick={handleDepart}
+                      disabled={routeActionLoading}
+                      className="w-full h-14 rounded-xl bg-[#E61A27] hover:bg-[#B31217] disabled:opacity-60 text-white font-bold text-base transition-colors flex items-center justify-center gap-2 shadow-sm"
+                    >
+                      {routeActionLoading ? (
+                        <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                      ) : (
+                        <>
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0M3 7h18M3 7l2-4h14l2 4M3 7v10h1m15 0h1V7" />
+                          </svg>
+                          Salir del CEDIS
+                        </>
+                      )}
+                    </button>
+                    {/* Report missing items for the whole route */}
+                    <button
+                      onClick={() => setShowMissingForm(v => !v)}
+                      className="w-full h-11 rounded-xl border border-red-200 text-sm font-medium text-red-500 hover:bg-red-50 transition-colors"
+                    >
+                      Reportar pedido faltante en carga
+                    </button>
+                  </div>
+                )}
+
+                <AnimatePresence>
+                  {showMissingForm && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="pt-2 space-y-3">
+                        <textarea
+                          value={missingNotes}
+                          onChange={e => setMissingNotes(e.target.value)}
+                          rows={3}
+                          placeholder="Describe qué pedido o productos faltan en el camión…"
+                          className="w-full border border-gray-200 rounded-xl px-3.5 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-red-200 focus:border-red-400"
+                        />
+                        <button
+                          onClick={handleMissingRoute}
+                          disabled={routeActionLoading || !missingNotes.trim()}
+                          className="w-full h-11 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold text-sm transition-colors flex items-center justify-center gap-2"
+                        >
+                          {routeActionLoading
+                            ? <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                            : 'Confirmar faltante'}
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
 
-              {(route.stops ?? []).length === 0 ? (
-                <p className="text-sm text-gray-400">Sin paradas en esta ruta.</p>
-              ) : (
-                <div className="space-y-3">
-                  {route.stops!.map((stop, i) => (
-                    <div key={i} className="flex gap-3 items-start">
-                      <div className="w-8 h-8 rounded-full bg-[#E61A27]/10 flex items-center justify-center text-xs font-extrabold text-[#E61A27] shrink-0 tabular-nums">
-                        {stop.stop_number ?? i + 1}
-                      </div>
-                      <div className="flex-1 min-w-0 pt-0.5">
-                        <p className="text-sm font-semibold text-gray-900">{stop.cliente ?? stop.id_pedido ?? stop.order_id}</p>
-                        {stop.direccion && <p className="text-xs text-gray-400 mt-0.5">{stop.direccion}</p>}
-                        {stop.eta && <p className="text-xs text-gray-400 mt-0.5">ETA: {stop.eta}</p>}
-                      </div>
-                      {stop.status && (
-                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${
-                          stop.status === 'completada' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
-                        }`}>{stop.status}</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            </>
           )}
         </motion.div>
       )}
 
-      {/* ── INCIDENCIAS ──────────────────────────────────────────────── */}
+      {/* ── INCIDENCIAS ────────────────────────────────────────────────────── */}
       {activeTab === 'incidencias' && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-5">
@@ -378,6 +564,14 @@ export default function RepartidorPage() {
                     <option key={t.key} value={t.key}>{t.label}</option>
                   ))}
                 </select>
+                {incidentType === 'producto_faltante' && (
+                  <p className="text-xs text-orange-600 font-medium flex items-center gap-1 mt-1">
+                    <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                    </svg>
+                    El cliente recibirá una notificación automática.
+                  </p>
+                )}
               </div>
 
               <div className="space-y-1.5">
@@ -421,11 +615,9 @@ export default function RepartidorPage() {
         </motion.div>
       )}
 
-      {/* ── PERFIL ───────────────────────────────────────────────────── */}
+      {/* ── PERFIL ─────────────────────────────────────────────────────────── */}
       {activeTab === 'perfil' && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
-
-          {/* Profile header */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 flex items-center gap-4">
             <div className="w-16 h-16 rounded-2xl bg-[#E61A27] flex items-center justify-center shrink-0">
               <span className="text-white font-extrabold text-2xl">
@@ -440,7 +632,6 @@ export default function RepartidorPage() {
             </div>
           </div>
 
-          {/* Stats */}
           <div className="grid grid-cols-3 gap-3">
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 text-center">
               <p className="text-xl font-bold text-gray-900 tabular-nums">
@@ -464,7 +655,6 @@ export default function RepartidorPage() {
             </div>
           </div>
 
-          {/* Quick nav */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
             <button
               onClick={() => navigate('/repartidor/ruta')}
@@ -477,7 +667,6 @@ export default function RepartidorPage() {
             </button>
           </div>
 
-          {/* Logout */}
           <button
             onClick={handleLogout}
             className="w-full h-14 bg-white border border-red-100 text-[#E61A27] font-bold text-base rounded-2xl hover:bg-red-50 transition-colors flex items-center justify-center gap-2"

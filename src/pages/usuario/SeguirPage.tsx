@@ -15,20 +15,55 @@ const STATUS_ORDER: Record<string, number> = {
   'Pendiente': 0, 'Confirmado': 1, 'En preparación': 2, 'En camino': 3, 'Entregado': 4,
 };
 
-const STATUS_HERO: Record<string, { bg: string; label: string }> = {
-  'Pendiente':       { bg: 'bg-gray-900',    label: 'Pedido recibido' },
-  'Confirmado':      { bg: 'bg-blue-600',    label: 'Pedido confirmado' },
-  'En preparación':  { bg: 'bg-indigo-600',  label: 'Preparando tu pedido' },
-  'En camino':       { bg: 'bg-orange-500',  label: 'Tu pedido va en camino' },
-  'Entregado':       { bg: 'bg-green-600',   label: '¡Entregado con éxito!' },
-  'Cancelado':       { bg: 'bg-red-600',     label: 'Pedido cancelado' },
+const STATUS_HERO: Record<string, { border: string; accent: string; iconBg: string; badge: string; label: string }> = {
+  'Pendiente':      { border: 'border-gray-200',   accent: 'text-gray-700',   iconBg: 'bg-gray-100',   badge: 'bg-gray-100 text-gray-600',    label: 'Pedido recibido' },
+  'Confirmado':     { border: 'border-blue-200',   accent: 'text-blue-700',   iconBg: 'bg-blue-50',    badge: 'bg-blue-100 text-blue-700',    label: 'Pedido confirmado' },
+  'En preparación': { border: 'border-indigo-200', accent: 'text-indigo-700', iconBg: 'bg-indigo-50',  badge: 'bg-indigo-100 text-indigo-700',label: 'Preparando tu pedido' },
+  'En camino':      { border: 'border-orange-200', accent: 'text-orange-700', iconBg: 'bg-orange-50',  badge: 'bg-orange-100 text-orange-700',label: 'Tu pedido va en camino' },
+  'Entregado':      { border: 'border-green-200',  accent: 'text-green-700',  iconBg: 'bg-green-50',   badge: 'bg-green-100 text-green-700',  label: '¡Entregado con éxito!' },
+  'Cancelado':      { border: 'border-red-200',    accent: 'text-red-700',    iconBg: 'bg-red-50',     badge: 'bg-red-100 text-red-700',      label: 'Pedido cancelado' },
 };
 
-interface OrderItem { nombre: string; cantidad: number; }
+// API returns lowercase/underscore values; normalize to title-case keys used above
+function normalizeStatus(raw: string): string {
+  const map: Record<string, string> = {
+    pendiente:        'Pendiente',
+    confirmado:       'Confirmado',
+    asignado:         'Confirmado',
+    en_preparacion:   'En preparación',
+    'en preparación': 'En preparación',
+    en_camino:        'En camino',
+    'en camino':      'En camino',
+    entregado:        'Entregado',
+    incompleto:       'Entregado',
+    cancelado:        'Cancelado',
+  }
+  const key = raw.toLowerCase().replace(/ /g, '_')
+  return map[key] ?? map[raw.toLowerCase()] ?? raw
+}
+
+interface OrderItem { sku?: string; nombre: string; cantidad: number; precio_unitario?: number; }
+interface GroupedItem { sku?: string; nombre: string; cantidad: number; precio_unitario?: number; }
+
+function groupItems(items: OrderItem[]): GroupedItem[] {
+  const map = new Map<string, GroupedItem>()
+  for (const item of items) {
+    const key = item.sku ?? item.nombre
+    const existing = map.get(key)
+    if (existing) {
+      map.set(key, { ...existing, cantidad: existing.cantidad + item.cantidad })
+    } else {
+      map.set(key, { ...item })
+    }
+  }
+  return Array.from(map.values())
+}
+
 interface Order {
   id_pedido: string;
   status_final: string;
   fecha_pedido: string;
+  subtotal?: number;
   total: number;
   items: OrderItem[];
   repartidor?: { nombre: string; vehiculo?: string };
@@ -36,10 +71,11 @@ interface Order {
 }
 
 export default function SeguirPage() {
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [orders, setOrders]     = useState<Order[]>([]);
   const [selected, setSelected] = useState<Order | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading]   = useState(true);
+  const [error, setError]       = useState<string | null>(null);
+  const [showAllItems, setShowAllItems] = useState(false);
 
   useEffect(() => {
     const token = localStorage.getItem('or_token');
@@ -47,20 +83,37 @@ export default function SeguirPage() {
 
     fetch(`${API}/api/orders/my`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => { if (!r.ok) throw new Error('Error al cargar pedidos'); return r.json(); })
-      .then((data: Order[]) => {
-        if (Array.isArray(data) && data.length > 0) {
-          setOrders(data);
-          const active = data.find(o => !['Entregado', 'Cancelado'].includes(o.status_final));
-          setSelected(active ?? data[0]);
-        }
+      .then((data: any[]) => {
+        if (!Array.isArray(data) || data.length === 0) return;
+        const normalized: Order[] = data.map(o => ({
+          id_pedido:        o.id_pedido ?? o._id,
+          status_final:     normalizeStatus(o.status_final ?? 'pendiente'),
+          fecha_pedido:     o.fecha_pedido ?? o.createdAt ?? new Date().toISOString(),
+          subtotal:         o.subtotal ?? o.SubTotal ?? o.total ?? 0,
+          total:            o.total ?? o.Total ?? o.subtotal ?? 0,
+          items:            (o.items ?? []).map((i: any) => ({
+            sku:             i.sku,
+            nombre:          i.nombre ?? i.name ?? i.sku ?? 'Producto',
+            cantidad:        i.cantidad ?? i.quantity ?? 1,
+            precio_unitario: i.precio_unitario ?? i.precio ?? i.price,
+          })),
+          repartidor:       o.repartidor ?? null,
+          direccion_entrega: o.direccion_entrega ?? o.direccion ?? null,
+        }))
+        setOrders(normalized);
+        const active = normalized.find(o => !['Entregado', 'Cancelado'].includes(o.status_final));
+        setSelected(active ?? normalized[0]);
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
 
+  // Reset "see more" whenever a different order is selected
+  const handleSelect = (o: Order) => { setSelected(o); setShowAllItems(false); }
+
   const currentStep = selected ? (STATUS_ORDER[selected.status_final] ?? 0) : 0;
-  const hero = selected ? (STATUS_HERO[selected.status_final] ?? STATUS_HERO['Pendiente']) : null;
-  const isLive = selected?.status_final === 'En camino';
+  const hero        = selected ? (STATUS_HERO[selected.status_final] ?? STATUS_HERO['Pendiente']!) : null;
+  const isLive      = selected?.status_final === 'En camino';
 
   if (loading) {
     return (
@@ -85,7 +138,7 @@ export default function SeguirPage() {
         </div>
 
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl p-4">{error}</div>
+          <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-2xl p-4">{error}</div>
         )}
 
         {orders.length === 0 && !error ? (
@@ -103,10 +156,10 @@ export default function SeguirPage() {
             {/* Order selector pills */}
             {orders.length > 1 && (
               <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
-                {orders.slice(0, 6).map(o => (
+                {orders.slice(0, 8).map(o => (
                   <button
                     key={o.id_pedido}
-                    onClick={() => setSelected(o)}
+                    onClick={() => handleSelect(o)}
                     className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all duration-150 ${
                       selected?.id_pedido === o.id_pedido
                         ? 'bg-gray-900 text-white border-gray-900'
@@ -130,40 +183,39 @@ export default function SeguirPage() {
                   className="space-y-3"
                 >
                   {/* Hero status card */}
-                  <div className={`${hero.bg} rounded-2xl p-5 text-white`}>
+                  <div className={`bg-white border-2 ${hero.border} rounded-2xl p-5`}>
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-2">
                         {isLive && (
                           <motion.span
-                            animate={{ scale: [1, 1.5, 1], opacity: [1, 0.5, 1] }}
+                            animate={{ scale: [1, 1.5, 1], opacity: [1, 0.4, 1] }}
                             transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
-                            className="block w-2 h-2 rounded-full bg-white"
+                            className="block w-2 h-2 rounded-full bg-orange-500"
                           />
                         )}
-                        <span className="text-[10px] font-bold uppercase tracking-widest text-white/70">
+                        <span className={`text-[10px] font-bold uppercase tracking-widest ${hero.accent}`}>
                           {isLive ? 'En tiempo real' : 'Estado actual'}
                         </span>
                       </div>
                       {selected.total > 0 && (
-                        <span className="text-xs font-semibold text-white/70">
+                        <span className="text-xs font-semibold text-gray-400 tabular-nums">
                           ${selected.total.toLocaleString('es-MX')} MXN
                         </span>
                       )}
                     </div>
 
-                    <h2 className="text-2xl font-bold leading-tight">{hero.label}</h2>
-                    <p className="text-white/70 text-sm mt-1">
+                    <h2 className="text-2xl font-bold text-gray-900 leading-tight">{hero.label}</h2>
+                    <p className="text-sm text-gray-400 mt-1">
                       {selected.items?.length ?? 0} {selected.items?.length === 1 ? 'producto' : 'productos'}
                     </p>
 
-                    {/* Progress bar — hide for cancelled */}
                     {selected.status_final !== 'Cancelado' && (
                       <div className="flex gap-1.5 mt-4">
                         {TIMELINE.map((_, i) => (
                           <motion.div
                             key={i}
-                            className="flex-1 h-1 rounded-full"
-                            animate={{ backgroundColor: i <= currentStep ? 'rgba(255,255,255,1)' : 'rgba(255,255,255,0.25)' }}
+                            className="flex-1 h-1.5 rounded-full"
+                            animate={{ backgroundColor: i <= currentStep ? '#E61A27' : '#e5e7eb' }}
                             transition={{ duration: 0.4, delay: i * 0.06 }}
                           />
                         ))}
@@ -171,7 +223,7 @@ export default function SeguirPage() {
                     )}
                   </div>
 
-                  {/* Delivery info card */}
+                  {/* Delivery info */}
                   {(selected.repartidor?.nombre || selected.direccion_entrega) && (
                     <div className="bg-white rounded-2xl border border-gray-100 p-4 space-y-3">
                       {selected.repartidor?.nombre && (
@@ -220,10 +272,8 @@ export default function SeguirPage() {
                         const isFuture = i > currentStep;
                         return (
                           <div key={step.key} className="flex gap-4">
-                            {/* Step indicator column */}
                             <div className="flex flex-col items-center">
                               <div className="relative flex items-center justify-center w-8 h-8">
-                                {/* Pulsing ring on active step */}
                                 {isActive && (
                                   <motion.div
                                     animate={{ scale: [1, 1.7, 1], opacity: [0.6, 0, 0.6] }}
@@ -233,7 +283,7 @@ export default function SeguirPage() {
                                 )}
                                 <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 z-10 transition-all duration-300 ${
                                   isDone   ? 'bg-gray-900 border-gray-900' :
-                                  isActive ? 'bg-white border-red-500' :
+                                  isActive ? 'bg-white border-red-500'    :
                                              'bg-white border-gray-200'
                                 }`}>
                                   {isDone ? (
@@ -255,8 +305,6 @@ export default function SeguirPage() {
                                 />
                               )}
                             </div>
-
-                            {/* Step content */}
                             <div className="pb-2 pt-1.5 flex-1 min-w-0">
                               <p className={`text-sm font-semibold transition-colors ${
                                 isFuture ? 'text-gray-300' :
@@ -275,27 +323,62 @@ export default function SeguirPage() {
                     </div>
                   </div>
 
-                  {/* Products compact */}
-                  {(selected.items ?? []).length > 0 && (
-                    <div className="bg-white rounded-2xl border border-gray-100 p-5">
-                      <h3 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">
-                        Productos del pedido
-                      </h3>
-                      <div className="space-y-2.5">
-                        {selected.items.slice(0, 5).map((item, i) => (
-                          <div key={i} className="flex justify-between items-center">
-                            <span className="text-sm text-gray-700 truncate mr-4">{item.nombre}</span>
-                            <span className="text-xs font-semibold text-gray-500 tabular-nums bg-gray-50 px-2.5 py-0.5 rounded-full shrink-0">
-                              ×{item.cantidad}
+                  {/* Grouped order detail — compact with see more */}
+                  {(selected.items ?? []).length > 0 && (() => {
+                    const grouped   = groupItems(selected.items)
+                    const hasPrice  = grouped.some(g => g.precio_unitario != null)
+                    const LIMIT     = 3
+                    const visible   = showAllItems ? grouped : grouped.slice(0, LIMIT)
+                    const hiddenCnt = grouped.length - LIMIT
+                    return (
+                      <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+                        <div className="px-5 pt-4 pb-2 flex items-center justify-between">
+                          <h3 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                            Detalle del pedido
+                          </h3>
+                          <span className="text-xs text-gray-400 tabular-nums">
+                            {grouped.length} {grouped.length === 1 ? 'producto' : 'productos'}
+                          </span>
+                        </div>
+
+                        <div className="divide-y divide-gray-100">
+                          {visible.map((item, i) => (
+                            <div key={i} className="flex items-center justify-between px-5 py-2.5">
+                              <p className="text-sm text-gray-800 truncate flex-1 mr-3">{item.nombre}</p>
+                              <div className="flex items-center gap-2.5 shrink-0">
+                                <span className="text-xs font-semibold text-gray-400 tabular-nums">×{item.cantidad}</span>
+                                {item.precio_unitario != null && (
+                                  <span className="text-xs font-semibold text-gray-700 tabular-nums w-16 text-right">
+                                    ${(item.cantidad * item.precio_unitario).toFixed(2)}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* See more / less toggle */}
+                        {grouped.length > LIMIT && (
+                          <button
+                            onClick={() => setShowAllItems(v => !v)}
+                            className="w-full px-5 py-2.5 border-t border-gray-100 text-xs font-semibold text-[#E61A27] hover:bg-gray-50 transition-colors text-left"
+                          >
+                            {showAllItems ? 'Ver menos ↑' : `Ver ${hiddenCnt} más ↓`}
+                          </button>
+                        )}
+
+                        {/* Total row */}
+                        {selected.total > 0 && (
+                          <div className="px-5 py-3 border-t border-gray-100 bg-gray-50 flex justify-between items-center">
+                            <span className="text-sm font-bold text-gray-700">Total</span>
+                            <span className="text-sm font-bold text-gray-900 tabular-nums">
+                              ${selected.total.toLocaleString('es-MX', { minimumFractionDigits: 2 })} MXN
                             </span>
                           </div>
-                        ))}
-                        {selected.items.length > 5 && (
-                          <p className="text-xs text-red-600 font-semibold">+{selected.items.length - 5} más</p>
                         )}
                       </div>
-                    </div>
-                  )}
+                    )
+                  })()}
                 </motion.div>
               </AnimatePresence>
             )}

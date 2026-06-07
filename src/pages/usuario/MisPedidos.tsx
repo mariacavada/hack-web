@@ -1,9 +1,12 @@
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useNavigate } from "react-router";
-import { useAuth } from "../../auth/AuthContext";
+import { useNavigate } from 'react-router';
+import { useAuth } from '../../auth/AuthContext';
+import { useCart } from './CartContext';
+import { mockProducts } from './MockProducts';
 
-// --- TYPES & INTERFACES ---
+const API = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
+
 interface OrderItem {
   sku?: string;
   nombre: string;
@@ -11,623 +14,460 @@ interface OrderItem {
   precio_unitario?: number;
 }
 
-interface TrackingUpdate {
-  status: string;
-  timestamp: string;
-  descripcion: string;
-}
-
 interface Order {
   id_pedido: string;
   fecha_pedido: string;
-  status_final: 'Pendiente' | 'Confirmado' | 'En preparación' | 'En camino' | 'Entregado' | 'Cancelado';
+  status_final: string;
   subtotal: number;
   total: number;
-  cedis_id: string;
   items: OrderItem[];
-  tracking: TrackingUpdate[];
   direccion_entrega?: string;
-  repartidor?: {
-    nombre: string;
-    vehiculo: string;
-  };
+  repartidor?: { nombre: string; vehiculo?: string };
+  tracking?: { status: string; timestamp: string; descripcion: string }[];
 }
 
-interface SummaryData {
-  totalPedidos: number;
-  totalGastado: number;
-  pedidoRecienteText: string;
-  productoMasComprado: string;
+const ACTIVE_STATUSES = ['Pendiente', 'Confirmado', 'En preparación', 'En camino']
+
+function normalizeStatus(raw: string): string {
+  const map: Record<string, string> = {
+    pendiente: 'Pendiente', confirmado: 'Confirmado', asignado: 'Confirmado',
+    en_preparacion: 'En preparación', 'en preparación': 'En preparación',
+    en_camino: 'En camino', 'en camino': 'En camino',
+    entregado: 'Entregado', incompleto: 'Entregado', cancelado: 'Cancelado',
+  }
+  const key = (raw ?? '').toLowerCase().replace(/ /g, '_')
+  return map[key] ?? map[(raw ?? '').toLowerCase()] ?? raw
 }
 
-interface TopProduct {
-  nombre: string;
-  cantidad: number;
+function groupItems(items: OrderItem[]): OrderItem[] {
+  const map = new Map<string, OrderItem>()
+  for (const item of items) {
+    const key = item.sku ?? item.nombre
+    const ex = map.get(key)
+    if (ex) map.set(key, { ...ex, cantidad: ex.cantidad + item.cantidad })
+    else map.set(key, { ...item })
+  }
+  return Array.from(map.values())
 }
 
-// --- MAIN COMPONENT ---
-export default function MisPedidosPage() {
-  const navigate = useNavigate();
-  const { user } = useAuth(); // 2. Consumimos el usuario y su JWT directamente del contexto
+const STATUS_BADGE: Record<string, string> = {
+  'Pendiente':      'bg-yellow-100 text-yellow-700',
+  'Confirmado':     'bg-blue-100 text-blue-700',
+  'En preparación': 'bg-indigo-100 text-indigo-700',
+  'En camino':      'bg-orange-100 text-orange-700',
+  'Entregado':      'bg-green-100 text-green-700',
+  'Cancelado':      'bg-red-100 text-red-600',
+}
 
-  // State variables
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+function TruckIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0M3 7h18M3 7l2-4h14l2 4M3 7v10h1m15 0h1V7" />
+    </svg>
+  )
+}
 
-  // Filter States
-  const [searchQuery, setSearchQuery] = useState('');
-  const [dateFilter, setDateFilter] = useState<'7' | '30' | '90' | 'todo'>('todo');
-  const [statusFilter, setStatusFilter] = useState<string>('todos');
-  const [amountFilter, setAmountFilter] = useState<'todos' | 'under500' | '500-1000' | 'over1000'>('todos');
+function BoxIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+    </svg>
+  )
+}
 
-  // --- API FETCHING ---
-  useEffect(() => {
-    async function fetchOrders() {
-      // 3. Si no hay sesión o token listo, detenemos la petición de forma segura
-      if (!user || !user.token) {
-        setError("No hay una sesión activa de usuario. Por favor inicia sesión.");
-        setIsLoading(false);
-        return;
-      }
+function fmtDate(iso: string) {
+  return new Date(iso).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })
+}
 
-      setIsLoading(true);
-      setError(null);
-      try {
-        const API = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
-        const response = await fetch(`${API}/api/orders/my`, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${user.token}`, // 4. Inyección del token JWT verificado y corregido
-            'Content-Type': 'application/json'
-          }
-        });
-
-        if (!response.ok) {
-          throw new Error('Hubo un error al recuperar tu historial de pedidos.');
-        }
-
-        const data = await response.json();
-        console.log(data)
-        // Normalización de estructuras de datos
-        const normalizedData = (data || []).map((order: any) => ({
-          id_pedido: order.id_pedido || order._id,
-          fecha_pedido: order.fecha_pedido || order.createdAt || new Date().toISOString(),
-          status_final: order.status_final || 'Pendiente',
-          subtotal: order.SubTotal || order.subtotal || order.total || order.Total || 0,
-          total: order.Total || order.total || order.SubTotal || order.subtotal || 0,
-          cedis_id: order.cedis || order.cedis_id || '',
-          items: (order.items || []).map((item: any) => ({
-            sku: item.sku,
-            nombre: item.nombre || item.name || item.sku || 'Producto',
-            cantidad: item.cantidad || item.quantity || 1,
-            precio_unitario: item.precio_unitario ?? item.precio ?? item.price,
-          })),
-          tracking: order.tracking || [],
-          direccion_entrega: order.direccion_entrega || order.direccion || null,
-          repartidor: order.repartidor || null
-        }));
-
-        setOrders(normalizedData);
-      } catch (err: any) {
-        setError(err.message || 'Error de conexión.');
-      } finally {
-        setIsLoading(false);
-      }
-    }
-
-    fetchOrders();
-  }, [user]); // Añadido user como dependencia para re-ejecutar si la sesión cambia
-
-  // --- STATS & INSIGHTS ANALYTICS CALCULATIONS ---
-  const summaryMetrics = useMemo<SummaryData>(() => {
-    if (orders.length === 0) {
-      return { totalPedidos: 0, totalGastado: 0, pedidoRecienteText: 'Sin pedidos', productoMasComprado: 'N/A' };
-    }
-
-    const totalPedidos = orders.length;
-    const totalGastado = orders.reduce((sum, order) => sum + order.total, 0);
-
-    const recentOrder = orders[0];
-    let pedidoRecienteText = 'Hoy';
-    if (recentOrder?.fecha_pedido) {
-      const diffTime = Math.abs(Date.now() - new Date(recentOrder.fecha_pedido).getTime());
-      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-      pedidoRecienteText = diffDays === 0 ? 'Hoy' : diffDays === 1 ? 'Ayer' : `Hace ${diffDays} días`;
-    }
-
-    const productCounts: { [key: string]: number } = {};
-    orders.forEach(o => {
-      o.items.forEach(item => {
-        productCounts[item.nombre] = (productCounts[item.nombre] || 0) + item.cantidad;
-      });
-    });
-    
-    let productoMasComprado = 'Ninguno';
-    let maxQty = 0;
-    Object.entries(productCounts).forEach(([name, qty]) => {
-      if (qty > maxQty) {
-        maxQty = qty;
-        productoMasComprado = name;
-      }
-    });
-
-    return { totalPedidos, totalGastado, pedidoRecienteText, productoMasComprado };
-  }, [orders]);
-
-  const topProductsList = useMemo<TopProduct[]>(() => {
-    const productCounts: { [key: string]: number } = {};
-    orders.forEach(o => {
-      o.items.forEach(item => {
-        productCounts[item.nombre] = (productCounts[item.nombre] || 0) + 1;
-      });
-    });
-    return Object.entries(productCounts)
-      .map(([nombre, cantidad]) => ({ nombre, cantidad }))
-      .sort((a, b) => b.cantidad - a.cantidad)
-      .slice(0, 5);
-  }, [orders]);
-
-  const spendingHistoryCoordinates = useMemo(() => {
-    if (orders.length === 0) return '';
-    const sorted = [...orders].sort((a, b) => new Date(a.fecha_pedido).getTime() - new Date(b.fecha_pedido).getTime());
-    const dataPoints = sorted.map(o => o.total);
-    const maxVal = Math.max(...dataPoints, 1000);
-    const minVal = Math.min(...dataPoints, 0);
-    const range = maxVal - minVal;
-    
-    const width = 500;
-    const height = 80;
-    const padding = 5;
-
-    return dataPoints.map((val, idx) => {
-      const x = (idx / Math.max(dataPoints.length - 1, 1)) * (width - padding * 2) + padding;
-      const y = height - (((val - minVal) / range) * (height - padding * 2) + padding);
-      return `${x},${y}`;
-    }).join(' ');
-  }, [orders]);
-
-  // --- FILTERS LOGIC ---
-  const filteredOrders = useMemo(() => {
-    return orders.filter(order => {
-      const matchesSearch = 
-        order.id_pedido.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        order.items.some(i => i.nombre.toLowerCase().includes(searchQuery.toLowerCase()));
-
-      const matchesStatus = statusFilter === 'todos' || order.status_final.toLowerCase() === statusFilter.toLowerCase();
-
-      let matchesAmount = true;
-      if (amountFilter === 'under500') matchesAmount = order.total < 500;
-      else if (amountFilter === '500-1000') matchesAmount = order.total >= 500 && order.total <= 1000;
-      else if (amountFilter === 'over1000') matchesAmount = order.total > 1000;
-
-      let matchesDate = true;
-      if (dateFilter !== 'todo') {
-        const orderTime = new Date(order.fecha_pedido).getTime();
-        const now = Date.now();
-        const diffDays = (now - orderTime) / (1000 * 60 * 60 * 24);
-        matchesDate = diffDays <= parseInt(dateFilter);
-      }
-
-      return matchesSearch && matchesStatus && matchesAmount && matchesDate;
-    });
-  }, [orders, searchQuery, dateFilter, statusFilter, amountFilter]);
-
-  const getStatusStyle = (status: Order['status_final']) => {
-    const normalize = status.toLowerCase();
-    if (normalize === 'pendiente') return 'bg-yellow-50 text-yellow-700 border-yellow-200';
-    if (normalize === 'confirmado') return 'bg-blue-50 text-blue-700 border-blue-200';
-    if (normalize === 'en preparación') return 'bg-indigo-50 text-indigo-700 border-indigo-200';
-    if (normalize === 'en camino') return 'bg-orange-50 text-orange-700 border-orange-200';
-    if (normalize === 'entregado') return 'bg-green-50 text-green-700 border-green-200';
-    return 'bg-red-50 text-red-700 border-red-200';
-  };
+// ── Order detail drawer ───────────────────────────────────────────────────────
+function OrderDrawer({
+  order,
+  onClose,
+  onRepeat,
+}: {
+  order: Order
+  onClose: () => void
+  onRepeat: (order: Order) => void
+}) {
+  const grouped = useMemo(() => groupItems(order.items), [order])
+  const canRepeat = ['Entregado', 'Cancelado'].includes(order.status_final)
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900 font-sans antialiased">
-      <div className="max-w-6xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
-        
-        {/* HEADER SECTION */}
-        <header className="border-b border-gray-200 pb-5 mb-6">
-          <h1 className="text-2xl font-bold tracking-tight text-gray-900 sm:text-3xl">Mis pedidos</h1>
-          <p className="mt-1.5 text-sm text-gray-500">
-            Consulta tu historial de compras y el estado de tus entregas en tiempo real.
-          </p>
-        </header>
+    <>
+      <motion.div
+        initial={{ opacity: 0 }} animate={{ opacity: 0.4 }} exit={{ opacity: 0 }}
+        onClick={onClose}
+        className="fixed inset-0 bg-black z-40"
+      />
+      <motion.div
+        initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+        transition={{ type: 'tween', duration: 0.26 }}
+        className="fixed bottom-0 left-0 right-0 max-h-[88dvh] bg-white rounded-t-3xl shadow-xl z-50 flex flex-col overflow-y-auto"
+      >
+        <div className="flex justify-center pt-3 pb-1 shrink-0">
+          <div className="w-10 h-1 bg-gray-200 rounded-full" />
+        </div>
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 pt-2 pb-4 border-b border-gray-100 shrink-0">
+          <div>
+            <h2 className="text-base font-bold text-gray-900">{order.id_pedido}</h2>
+            <p className="text-xs text-gray-400 mt-0.5">{fmtDate(order.fecha_pedido)}</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${STATUS_BADGE[order.status_final] ?? 'bg-gray-100 text-gray-600'}`}>
+              {order.status_final}
+            </span>
+            <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 transition-colors">
+              <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {/* Items */}
+        <div className="px-5 py-4 flex-1">
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Artículos</p>
+          {grouped.map((item, i) => (
+            <div key={i} className="flex justify-between items-center py-2.5 border-b border-gray-50 last:border-0">
+              <span className="text-sm text-gray-800 truncate flex-1 mr-3">{item.nombre}</span>
+              <div className="flex items-center gap-2.5 shrink-0">
+                <span className="text-xs text-gray-400 tabular-nums">×{item.cantidad}</span>
+                {item.precio_unitario != null && (
+                  <span className="text-sm font-semibold text-gray-900 tabular-nums w-16 text-right">
+                    ${(item.cantidad * item.precio_unitario).toFixed(2)}
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
+          {order.total > 0 && (
+            <div className="flex justify-between pt-3 mt-1 border-t border-gray-200">
+              <span className="text-sm font-bold text-gray-700">Total</span>
+              <span className="text-sm font-bold text-gray-900 tabular-nums">
+                ${order.total.toLocaleString('es-MX', { minimumFractionDigits: 2 })} MXN
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="px-5 pb-8 pt-2 shrink-0 space-y-2">
+          {canRepeat && (
+            <button
+              onClick={() => onRepeat(order)}
+              className="w-full h-12 bg-[#E61A27] hover:bg-[#C9141A] text-white font-bold rounded-2xl transition-colors flex items-center justify-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Repetir este pedido
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            className="w-full h-11 border border-gray-200 text-gray-600 font-semibold rounded-2xl hover:bg-gray-50 transition-colors text-sm"
+          >
+            Cerrar
+          </button>
+        </div>
+      </motion.div>
+    </>
+  )
+}
+
+// ── Repeat confirm sheet ──────────────────────────────────────────────────────
+function RepeatConfirmSheet({
+  order,
+  onConfirm,
+  onCancel,
+}: {
+  order: Order
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  const grouped = useMemo(() => groupItems(order.items), [order])
+  const matchedItems = useMemo(() =>
+    grouped.map(item => ({
+      ...item,
+      product:
+        mockProducts.find(p => p.sku === item.sku) ??
+        mockProducts.find(p => p.nombre.toLowerCase() === item.nombre.toLowerCase()),
+    })),
+  [grouped])
+  const unavailableCount = matchedItems.filter(i => !i.product).length
+
+  return (
+    <>
+      <motion.div
+        initial={{ opacity: 0 }} animate={{ opacity: 0.5 }} exit={{ opacity: 0 }}
+        onClick={onCancel}
+        className="fixed inset-0 bg-black z-[60]"
+      />
+      <motion.div
+        initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+        transition={{ type: 'tween', duration: 0.24 }}
+        className="fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl shadow-xl z-[70] px-5 pb-8 pt-4"
+      >
+        <div className="flex justify-center mb-4">
+          <div className="w-10 h-1 bg-gray-200 rounded-full" />
+        </div>
+
+        <h2 className="text-lg font-bold text-gray-900 mb-1">¿Repetir este pedido?</h2>
+        <p className="text-sm text-gray-400 mb-4">
+          {grouped.length} producto{grouped.length !== 1 ? 's' : ''} se agregarán al carrito.
+          {unavailableCount > 0 && (
+            <span className="text-orange-500 font-semibold"> {unavailableCount} podrían no estar disponibles.</span>
+          )}
+        </p>
+
+        <div className="bg-gray-50 rounded-2xl p-4 mb-5 max-h-44 overflow-y-auto space-y-1.5">
+          {matchedItems.map((item, i) => (
+            <div key={i} className="flex justify-between text-sm">
+              <span className={`truncate mr-3 ${item.product ? 'text-gray-700' : 'text-gray-400 line-through'}`}>
+                {item.nombre}
+              </span>
+              <span className="text-gray-400 tabular-nums shrink-0">×{item.cantidad}</span>
+            </div>
+          ))}
+        </div>
+
+        <button
+          onClick={onConfirm}
+          className="w-full h-12 bg-[#E61A27] hover:bg-[#C9141A] text-white font-bold rounded-2xl transition-colors mb-2"
+        >
+          Agregar al carrito e ir a checkout
+        </button>
+        <button
+          onClick={onCancel}
+          className="w-full h-11 border border-gray-200 text-gray-600 font-semibold rounded-2xl hover:bg-gray-50 transition-colors text-sm"
+        >
+          Cancelar
+        </button>
+      </motion.div>
+    </>
+  )
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
+export default function MisPedidosPage() {
+  const navigate             = useNavigate()
+  const { user }             = useAuth()
+  const { changeQty, clear } = useCart()
+
+  const [orders, setOrders]       = useState<Order[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError]         = useState<string | null>(null)
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
+  const [repeatTarget, setRepeatTarget]   = useState<Order | null>(null)
+
+  useEffect(() => {
+    const token = localStorage.getItem('or_token')
+    if (!token) { setIsLoading(false); return; }
+    fetch(`${API}/api/orders/my`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => { if (!r.ok) throw new Error('Error al cargar pedidos'); return r.json(); })
+      .then((data: any[]) => {
+        setOrders((data ?? []).map(o => ({
+          id_pedido:         o.id_pedido ?? o._id,
+          fecha_pedido:      o.fecha_pedido ?? o.createdAt ?? new Date().toISOString(),
+          status_final:      normalizeStatus(o.status_final ?? 'pendiente'),
+          subtotal:          o.subtotal ?? o.SubTotal ?? o.total ?? 0,
+          total:             o.total ?? o.Total ?? o.subtotal ?? 0,
+          items:             (o.items ?? []).map((i: any) => ({
+            sku:             i.sku,
+            nombre:          i.nombre ?? i.name ?? i.sku ?? 'Producto',
+            cantidad:        i.cantidad ?? i.quantity ?? 1,
+            precio_unitario: i.precio_unitario ?? i.precio ?? i.price,
+          })),
+          direccion_entrega: o.direccion_entrega ?? o.direccion ?? null,
+          repartidor:        o.repartidor ?? null,
+          tracking:          o.tracking ?? [],
+        })))
+      })
+      .catch(e => setError(e.message))
+      .finally(() => setIsLoading(false))
+  }, [user])
+
+  const activeOrders   = useMemo(() => orders.filter(o => ACTIVE_STATUSES.includes(o.status_final)), [orders])
+  const previousOrders = useMemo(() => orders.filter(o => !ACTIVE_STATUSES.includes(o.status_final)), [orders])
+
+  const handleRepeatConfirm = (order: Order) => {
+    clear()
+    for (const item of groupItems(order.items)) {
+      const product =
+        mockProducts.find(p => p.sku === item.sku) ??
+        mockProducts.find(p => p.nombre.toLowerCase() === item.nombre.toLowerCase())
+      if (product) {
+        changeQty(product.sku, item.cantidad)
+      }
+    }
+    setRepeatTarget(null)
+    setSelectedOrder(null)
+    navigate('/usuario/tienda/checkout')
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-2xl mx-auto px-4 py-8">
+
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-2xl font-bold text-gray-900">Mis pedidos</h1>
+          <button
+            onClick={() => navigate('/usuario/tienda')}
+            className="flex items-center gap-1.5 bg-[#E61A27] hover:bg-[#C9141A] text-white text-sm font-bold px-4 py-2 rounded-full transition-colors shadow-sm"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+            Nuevo
+          </button>
+        </div>
 
         {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
-            {error}
-          </div>
+          <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-2xl p-4 mb-4">{error}</div>
         )}
 
-        {/* LOADING STATE */}
         {isLoading ? (
-          <div className="space-y-6">
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              {[...Array(4)].map((_, i) => (
-                <div key={i} className="bg-white p-4 rounded-lg border border-gray-200 h-24 animate-pulse" />
-              ))}
-            </div>
-            <div className="h-12 bg-white rounded-lg border border-gray-200 animate-pulse" />
-            <div className="space-y-4">
-              {[...Array(3)].map((_, i) => (
-                <div key={i} className="bg-white h-40 rounded-lg border border-gray-200 animate-pulse" />
-              ))}
+          <div className="space-y-4">
+            <div className="h-5 w-20 bg-gray-200 rounded-full animate-pulse" />
+            <div className="h-20 bg-white rounded-2xl border border-gray-100 animate-pulse" />
+            <div className="h-5 w-24 bg-gray-200 rounded-full animate-pulse mt-4" />
+            <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+              {[0, 1, 2].map(i => <div key={i} className="h-16 animate-pulse border-b border-gray-50 last:border-0" />)}
             </div>
           </div>
         ) : (
-          <>
-            {/* KPI METRIC SUMMARY GRID */}
-            <section className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-              <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm transition-all hover:border-gray-300">
-                <span className="block text-xs font-medium text-gray-400 uppercase tracking-wider">Total pedidos</span>
-                <span className="block mt-1 text-2xl font-semibold text-gray-900">{summaryMetrics.totalPedidos} pedidos</span>
-              </div>
-              <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm transition-all hover:border-gray-300">
-                <span className="block text-xs font-medium text-gray-400 uppercase tracking-wider">Total gastado</span>
-                <span className="block mt-1 text-2xl font-semibold text-gray-900">
-                  ${summaryMetrics.totalGastado.toLocaleString('es-MX', { minimumFractionDigits: 2 })} <span className="text-xs text-gray-500 font-normal">MXN</span>
-                </span>
-              </div>
-              <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm transition-all hover:border-gray-300">
-                <span className="block text-xs font-medium text-gray-400 uppercase tracking-wider">Pedido más reciente</span>
-                <span className="block mt-1 text-2xl font-semibold text-gray-900">{summaryMetrics.pedidoRecienteText}</span>
-              </div>
-              <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm transition-all hover:border-gray-300 overflow-hidden">
-                <span className="block text-xs font-medium text-gray-400 uppercase tracking-wider">Producto estrella</span>
-                <span className="block mt-1 text-base font-semibold text-gray-900 truncate" title={summaryMetrics.productoMasComprado}>
-                  {summaryMetrics.productoMasComprado}
-                </span>
-              </div>
-            </section>
+          <div className="space-y-6">
 
-            {/* ANALYTICS SECTION */}
-            {orders.length > 0 && (
-              <section className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-                <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
-                  <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Productos más comprados</h3>
-                  <div className="space-y-2.5">
-                    {topProductsList.map((product, index) => {
-                      const maxQty = topProductsList[0]?.cantidad || 1;
-                      const percentage = (product.cantidad / maxQty) * 100;
-                      return (
-                        <div key={index} className="space-y-1">
-                          <div className="flex justify-between text-xs text-gray-700">
-                            <span className="font-medium truncate max-w-[75%]">{product.nombre}</span>
-                            <span className="text-gray-500">{product.cantidad} órdenes</span>
-                          </div>
-                          <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden">
-                            <div className="bg-red-600 h-full rounded-full" style={{ width: `${percentage}%` }} />
-                          </div>
+            {/* En curso */}
+            {activeOrders.length > 0 && (
+              <section>
+                <h2 className="text-sm font-bold text-gray-900 mb-3">En curso</h2>
+                <div className="space-y-3">
+                  {activeOrders.map((order, idx) => (
+                    <motion.button
+                      key={order.id_pedido}
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: idx * 0.04 }}
+                      onClick={() => navigate('/usuario/seguir')}
+                      className="w-full flex items-center gap-4 bg-white border-2 border-[#E61A27] rounded-2xl p-4 text-left hover:bg-red-50/30 transition-colors shadow-sm"
+                    >
+                      <div className="w-11 h-11 bg-red-50 rounded-xl flex items-center justify-center shrink-0">
+                        <TruckIcon className="w-6 h-6 text-[#E61A27]" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-bold text-gray-900">{order.id_pedido}</span>
+                          <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${STATUS_BADGE[order.status_final] ?? 'bg-gray-100 text-gray-600'}`}>
+                            {order.status_final}
+                          </span>
                         </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm flex flex-col justify-between">
-                  <div>
-                    <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Historial de gasto temporal</h3>
-                    <p className="text-xs text-gray-400">Fluctuación de valor por ticket en orden cronológico</p>
-                  </div>
-                  <div className="mt-4 w-full">
-                    <svg viewBox="0 0 500 80" className="w-full h-20 overflow-visible">
-                      <polyline
-                        fill="none"
-                        stroke="#dc2626"
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        points={spendingHistoryCoordinates}
-                      />
-                      {spendingHistoryCoordinates.split(' ').map((coord, i) => {
-                        const [x, y] = coord.split(',');
-                        if (!x || !y) return null;
-                        return (
-                          <circle
-                            key={i}
-                            cx={x}
-                            cy={y}
-                            r="3.5"
-                            className="fill-white stroke-red-600 stroke-2 hover:r-5 transition-all cursor-pointer"
-                          />
-                        );
-                      })}
-                    </svg>
-                  </div>
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {groupItems(order.items).length} producto{groupItems(order.items).length !== 1 ? 's' : ''} · llega hoy
+                        </p>
+                      </div>
+                      <svg className="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                      </svg>
+                    </motion.button>
+                  ))}
                 </div>
               </section>
             )}
 
-            {/* FILTER TOOLBAR */}
-            <section className="bg-white border border-gray-200 rounded-lg p-4 mb-6 shadow-sm">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Buscar pedido</label>
-                  <input
-                    type="text"
-                    className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500"
-                    placeholder="ID o nombre de producto..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                  />
+            {/* Anteriores */}
+            {previousOrders.length > 0 && (
+              <section>
+                <h2 className="text-sm font-bold text-gray-900 mb-3">Anteriores</h2>
+                <div className="bg-white rounded-2xl border border-gray-100 shadow-sm divide-y divide-gray-100 overflow-hidden">
+                  {previousOrders.map((order, idx) => {
+                    const grouped = groupItems(order.items)
+                    return (
+                      <motion.button
+                        key={order.id_pedido}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ delay: idx * 0.03 }}
+                        onClick={() => setSelectedOrder(order)}
+                        className="w-full flex items-center gap-3 px-4 py-4 text-left hover:bg-gray-50 transition-colors"
+                      >
+                        <div className="w-10 h-10 bg-gray-100 rounded-xl flex items-center justify-center shrink-0">
+                          <BoxIcon className="w-5 h-5 text-gray-500" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-bold text-gray-900">{order.id_pedido}</p>
+                          <p className="text-xs text-gray-400 mt-0.5">
+                            {fmtDate(order.fecha_pedido)} · {grouped.length} producto{grouped.length !== 1 ? 's' : ''}
+                          </p>
+                        </div>
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          <span className="text-sm font-bold text-gray-900 tabular-nums">
+                            ${order.total.toLocaleString('es-MX')}
+                          </span>
+                          <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${STATUS_BADGE[order.status_final] ?? 'bg-gray-100 text-gray-600'}`}>
+                            {order.status_final}
+                          </span>
+                        </div>
+                      </motion.button>
+                    )
+                  })}
                 </div>
+              </section>
+            )}
 
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Periodo de tiempo</label>
-                  <select
-                    className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-red-500"
-                    value={dateFilter}
-                    onChange={(e: any) => setDateFilter(e.target.value)}
-                  >
-                    <option value="todo">Todos los registros</option>
-                    <option value="7">Últimos 7 días</option>
-                    <option value="30">Últimos 30 días</option>
-                    <option value="90">Últimos 90 días</option>
-                  </select>
+            {/* Empty state */}
+            {activeOrders.length === 0 && previousOrders.length === 0 && (
+              <div className="bg-white rounded-2xl border border-dashed border-gray-200 p-12 text-center">
+                <div className="w-12 h-12 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                  <BoxIcon className="w-6 h-6 text-gray-400" />
                 </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Estado del envío</label>
-                  <select
-                    className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-red-500"
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                  >
-                    <option value="todos">Todos los estados</option>
-                    <option value="Pendiente">Pendiente</option>
-                    <option value="Confirmado">Confirmado</option>
-                    <option value="En preparación">En preparación</option>
-                    <option value="En camino">En camino</option>
-                    <option value="Entregado">Entregado</option>
-                    <option value="Cancelado">Cancelado</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Monto de la compra</label>
-                  <select
-                    className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-red-500"
-                    value={amountFilter}
-                    onChange={(e: any) => setAmountFilter(e.target.value)}
-                  >
-                    <option value="todos">Todos los montos</option>
-                    <option value="under500">Menos de $500.00</option>
-                    <option value="500-1000">$500.00 - $1,000.00</option>
-                    <option value="over1000">Más de $1,000.00</option>
-                  </select>
-                </div>
+                <p className="text-gray-900 font-semibold text-sm">Sin pedidos aún</p>
+                <p className="text-gray-400 text-xs mt-1">¡Haz tu primer pedido!</p>
+                <button
+                  onClick={() => navigate('/usuario/tienda')}
+                  className="mt-4 bg-[#E61A27] text-white text-sm font-bold px-5 py-2.5 rounded-xl hover:bg-[#C9141A] transition-colors"
+                >
+                  Ir a la tienda
+                </button>
               </div>
-            </section>
+            )}
 
-            {/* ORDERS CARDS LIST */}
-            <section className="space-y-4">
-              <AnimatePresence mode="popLayout">
-                {filteredOrders.length === 0 ? (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0 }}
-                    className="text-center py-12 bg-white border border-gray-200 rounded-lg shadow-sm"
-                  >
-                    <svg className="mx-auto h-12 w-12 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-                    </svg>
-                    <h3 className="mt-2 text-sm font-semibold text-gray-900">Todavía no has realizado pedidos</h3>
-                    <p className="mt-1 text-xs text-gray-500">¿Buscas algo refrescante? Explora nuestro catálogo actual.</p>
-                    <div className="mt-6">
-                      <button onClick={() => navigate("/usuario/tienda")} className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 transition-colors focus:outline-none">
-                        Explorar productos
-                      </button>
-                    </div>
-                  </motion.div>
-                ) : (
-                  filteredOrders.map((order) => (
-                    <motion.div
-                      layout
-                      key={order.id_pedido}
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0 }}
-                      transition={{ duration: 0.15 }}
-                      className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden hover:border-gray-300 transition-all"
-                    >
-                      <div className="bg-gray-50 px-4 py-3 border-b border-gray-200 flex flex-wrap items-center justify-between gap-3 text-xs sm:text-sm">
-                        <div className="flex items-center space-x-6">
-                          <div>
-                            <span className="block text-gray-400 text-[11px] font-bold uppercase tracking-wider">Fecha de pedido</span>
-                            <span className="font-medium text-gray-700">
-                              {new Date(order.fecha_pedido).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })}
-                            </span>
-                          </div>
-                          <div>
-                            <span className="block text-gray-400 text-[11px] font-bold uppercase tracking-wider">Total</span>
-                            <span className="font-bold text-gray-900">
-                              ${order.total.toLocaleString('es-MX', { minimumFractionDigits: 2 })} MXN
-                            </span>
-                          </div>
-                          <div>
-                            <span className="block text-gray-400 text-[11px] font-bold uppercase tracking-wider">ID Pedido</span>
-                            <span className="font-mono text-gray-600 text-xs">{order.id_pedido}</span>
-                          </div>
-                        </div>
-
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${getStatusStyle(order.status_final)}`}>
-                          {order.status_final}
-                        </span>
-                      </div>
-
-                      <div className="p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                        <div className="space-y-1 w-full sm:max-w-xl">
-                          {order.items.slice(0, 3).map((item, i) => (
-                            <div key={i} className="text-sm text-gray-700 flex items-center justify-between">
-                              <span className="truncate pr-4">• {item.nombre}</span>
-                              <span className="text-gray-400 text-xs shrink-0">x{item.cantidad}</span>
-                            </div>
-                          ))}
-                          {order.items.length > 3 && (
-                            <span className="text-xs text-red-600 font-medium block mt-1">
-                              +{order.items.length - 3} productos más en el pedido
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="flex sm:flex-col lg:flex-row gap-2 w-full sm:w-auto shrink-0 justify-end">
-                          <button
-                            onClick={() => setSelectedOrder(order)}
-                            className="flex-1 sm:flex-none text-center px-3 py-1.5 border border-gray-300 rounded-md text-xs font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors focus:outline-none"
-                          >
-                            Ver detalle
-                          </button>
-                          
-                          {['Pendiente', 'Confirmado', 'En preparación', 'En camino'].includes(order.status_final) && (
-                            <button className="flex-1 sm:flex-none text-center px-3 py-1.5 border border-transparent rounded-md text-xs font-medium text-white bg-red-600 hover:bg-red-700 transition-colors focus:outline-none shadow-sm">
-                              Seguir pedido
-                            </button>
-                          )}
-
-                          {order.status_final === 'Entregado' && (
-                            <button className="flex-1 sm:flex-none text-center px-3 py-1.5 border border-red-200 rounded-md text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 transition-colors focus:outline-none">
-                              Volver a comprar
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </motion.div>
-                  ))
-                )}
-              </AnimatePresence>
-            </section>
-          </>
-        )}
-
-        {/* SIDE DRAWER FOR ORDER SPECIFICS */}
-        <AnimatePresence>
-          {selectedOrder && (
-            <>
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 0.4 }}
-                exit={{ opacity: 0 }}
-                onClick={() => setSelectedOrder(null)}
-                className="fixed inset-0 bg-black z-40"
-              />
-
-              <motion.div
-                initial={{ x: '100%' }}
-                animate={{ x: 0 }}
-                exit={{ x: '100%' }}
-                transition={{ type: 'tween', duration: 0.25 }}
-                className="fixed top-0 right-0 h-full w-full sm:max-w-md bg-white shadow-xl z-50 overflow-y-auto flex flex-col border-l border-gray-200"
+            {/* Repetir un pedido anterior */}
+            {previousOrders.length > 0 && (
+              <button
+                onClick={() => setSelectedOrder(previousOrders[0])}
+                className="w-full py-4 text-center text-sm font-bold text-gray-700 hover:text-[#E61A27] transition-colors"
               >
-                <div className="p-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
-                  <div>
-                    <h2 className="text-base font-bold text-gray-900">Detalle del pedido</h2>
-                    <p className="text-xs text-gray-500 font-mono mt-0.5">{selectedOrder.id_pedido}</p>
-                  </div>
-                  <button
-                    onClick={() => setSelectedOrder(null)}
-                    className="p-1 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 transition-colors"
-                  >
-                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-
-                <div className="p-4 space-y-6 flex-1">
-                  <div className="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-md text-xs sm:text-sm">
-                    <span className="text-gray-500 font-medium">Estado actual</span>
-                    <span className={`px-2.5 py-0.5 rounded-full font-semibold border ${getStatusStyle(selectedOrder.status_final)}`}>
-                      {selectedOrder.status_final}
-                    </span>
-                  </div>
-
-                  <div>
-                    <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Artículos</h3>
-                    <div className="divide-y divide-gray-100 border border-gray-200 rounded-md overflow-hidden">
-                      {selectedOrder.items.map((item, index) => (
-                        <div key={index} className="p-3 bg-white flex justify-between items-start text-xs sm:text-sm">
-                          <div className="max-w-[70%]">
-                            <p className="font-medium text-gray-800 break-words">{item.nombre}</p>
-                            {item.precio_unitario != null && (
-                              <p className="text-xs text-gray-400 mt-0.5">Precio Unitario: ${item.precio_unitario.toFixed(2)} MXN</p>
-                            )}
-                          </div>
-                          <div className="text-right shrink-0">
-                            <p className="text-gray-500 font-medium">Cant: {item.cantidad}</p>
-                            {item.precio_unitario != null && (
-                              <p className="font-semibold text-gray-900 mt-0.5">${(item.cantidad * item.precio_unitario).toFixed(2)}</p>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="bg-gray-50 p-3 rounded-md border border-gray-200 space-y-1.5 text-xs sm:text-sm">
-                    <div className="flex justify-between text-gray-500">
-                      <span>Subtotal</span>
-                      <span>${selectedOrder.subtotal.toLocaleString('es-MX', { minimumFractionDigits: 2 })} MXN</span>
-                    </div>
-                    <div className="flex justify-between text-gray-500">
-                      <span>Costo de envío / Logística</span>
-                      <span>$0.00 MXN</span>
-                    </div>
-                    <div className="flex justify-between text-gray-900 font-bold text-base border-t border-gray-200 pt-1.5 mt-1">
-                      <span>Total final</span>
-                      <span>${selectedOrder.total.toLocaleString('es-MX', { minimumFractionDigits: 2 })} MXN</span>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Información de Entrega</h3>
-                    <div className="bg-white border border-gray-200 rounded-md p-3 text-xs sm:text-sm space-y-2">
-                      <div>
-                        <span className="block text-gray-400 text-[10px] uppercase font-bold tracking-tight">Dirección</span>
-                        <span className="text-gray-700 font-medium">{selectedOrder.direccion_entrega}</span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 pt-1 border-t border-gray-100">
-                        <div>
-                          <span className="block text-gray-400 text-[10px] uppercase font-bold tracking-tight">CEDIS de Despacho</span>
-                          <span className="text-gray-700 font-medium">ID #{selectedOrder.cedis_id}</span>
-                        </div>
-                        {selectedOrder.repartidor && (
-                          <div>
-                            <span className="block text-gray-400 text-[10px] uppercase font-bold tracking-tight">Repartidor</span>
-                            <span className="text-gray-700 font-medium truncate block">{selectedOrder.repartidor.nombre}</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div>
-                    <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Historial de Tracking</h3>
-                    <div className="relative border-l-2 border-gray-100 ml-2 pl-4 space-y-4">
-                      {selectedOrder.tracking.map((track, i) => (
-                        <div key={i} className="relative text-xs sm:text-sm">
-                          <div className={`absolute -left-[21px] top-1.5 w-2 h-2 rounded-full border-2 bg-white ${
-                            i === selectedOrder.tracking.length - 1 ? 'border-red-600 scale-125' : 'border-gray-300'
-                          }`} />
-                          <div className="flex justify-between items-baseline">
-                            <span className="font-bold text-gray-800">{track.status}</span>
-                            <span className="text-[10px] font-mono text-gray-400">{track.timestamp}</span>
-                          </div>
-                          <p className="text-gray-500 text-xs mt-0.5 leading-relaxed">{track.descripcion}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </motion.div>
-            </>
-          )}
-        </AnimatePresence>
-
+                Repetir un pedido anterior
+              </button>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* Drawers */}
+      <AnimatePresence>
+        {selectedOrder && !repeatTarget && (
+          <OrderDrawer
+            order={selectedOrder}
+            onClose={() => setSelectedOrder(null)}
+            onRepeat={order => setRepeatTarget(order)}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {repeatTarget && (
+          <RepeatConfirmSheet
+            order={repeatTarget}
+            onConfirm={() => handleRepeatConfirm(repeatTarget)}
+            onCancel={() => setRepeatTarget(null)}
+          />
+        )}
+      </AnimatePresence>
     </div>
-  );
+  )
 }
