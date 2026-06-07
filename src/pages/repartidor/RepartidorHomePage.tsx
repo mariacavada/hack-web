@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router';
 import { motion } from 'framer-motion';
 import { useAuth } from '../../auth/AuthContext';
-import { useRepartidor, isToday, STATUS_BADGE } from './RepartidorContext';
+import { useRepartidor, STATUS_BADGE } from './RepartidorContext';
 
 const quickLinks = [
   {
@@ -43,14 +43,20 @@ export default function RepartidorHomePage() {
   const navigate            = useNavigate();
   const { orders, loading } = useRepartidor();
 
-  const st  = (s: string) => s.toLowerCase();
-  const total      = orders.length;
-  const pendientes = orders.filter(o => !['entregado', 'cancelado'].includes(st(o.status_final))).length;
-  const entregadas = orders.filter(o => st(o.status_final) === 'entregado').length;
+  const st = (s: string) => s.toLowerCase();
 
-  // Show today's orders in the preview (all orders if none have a date)
-  const todayOrders = orders.filter(isToday);
-  const preview     = (todayOrders.length > 0 ? todayOrders : orders).slice(0, 6);
+  const todayStr    = new Date().toDateString();
+  const todayOrders = orders.filter(o => {
+    // Use delivery date first; fall back to assignment date, then order date
+    const d = o.fecha_entrega ?? o.assigned_at ?? o.fecha_pedido;
+    return !!d && new Date(d).toDateString() === todayStr;
+  });
+
+  const total      = todayOrders.length;
+  const pendientes = todayOrders.filter(o => !['entregado', 'cancelado'].includes(st(o.status_final))).length;
+  const entregadas = todayOrders.filter(o => st(o.status_final) === 'entregado').length;
+
+  const preview = todayOrders.slice(0, 6);
 
   const firstName = user?.nombre?.split(' ')[0] ?? 'Repartidor';
 

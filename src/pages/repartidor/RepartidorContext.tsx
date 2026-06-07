@@ -56,8 +56,8 @@ export function normalizeStatus(s?: string): string {
 
 const todayStr = new Date().toDateString();
 export function isToday(o: AssignedOrder): boolean {
-  // Priority: when it was assigned to the driver → scheduled delivery date → order creation date
-  const d = o.assigned_at ?? o.fecha_entrega ?? o.fecha_pedido;
+  // Delivery date first; if unset, fall back to assignment date then order date
+  const d = o.fecha_entrega ?? o.assigned_at ?? o.fecha_pedido;
   if (!d) return true;
   return new Date(d).toDateString() === todayStr;
 }
