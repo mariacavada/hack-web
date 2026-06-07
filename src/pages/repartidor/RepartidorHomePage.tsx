@@ -1,20 +1,7 @@
-import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { motion } from 'framer-motion';
 import { useAuth } from '../../auth/AuthContext';
-
-const API = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
-
-interface AnyOrder {
-  _id?: string;
-  id_pedido?: string;
-  status_final: string;
-  total?: number;
-  fecha_pedido?: string;
-  fecha_entrega?: string;
-  direccion_entrega?: string;
-  detalles?: { nombre_sku_solicitado?: string; nombre?: string; quantity?: number; cantidad?: number }[];
-}
+import { useRepartidor, isToday, STATUS_BADGE } from './RepartidorContext';
 
 const quickLinks = [
   {
@@ -46,31 +33,24 @@ const quickLinks = [
   },
 ];
 
-export default function RepartidorHomePage() {
-  const { user } = useAuth();
-  const navigate = useNavigate();
-  const [stats, setStats] = useState({ total: 0, pendientes: 0, entregadas: 0 });
-  const [ordersList, setOrdersList] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+function fmtDate(iso?: string) {
+  if (!iso) return null;
+  return new Date(iso).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' });
+}
 
-  useEffect(() => {
-    const token = localStorage.getItem('or_token');
-    if (!token) { setLoading(false); return; }
-    fetch(`${API}/api/driver/orders`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.ok ? r.json() : [])
-      .then((data: AnyOrder[] | { orders: AnyOrder[] }) => {
-        const orders: AnyOrder[] = Array.isArray(data) ? data : (data as any)?.orders ?? [];
-        setOrdersList(orders);
-        const st = (o: AnyOrder) => (o.status_final ?? '').toLowerCase();
-        setStats({
-          total:      orders.length,
-          pendientes: orders.filter(o => !['entregado', 'cancelado'].includes(st(o))).length,
-          entregadas: orders.filter(o => st(o) === 'entregado').length,
-        });
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
+export default function RepartidorHomePage() {
+  const { user }            = useAuth();
+  const navigate            = useNavigate();
+  const { orders, loading } = useRepartidor();
+
+  const st  = (s: string) => s.toLowerCase();
+  const total      = orders.length;
+  const pendientes = orders.filter(o => !['entregado', 'cancelado'].includes(st(o.status_final))).length;
+  const entregadas = orders.filter(o => st(o.status_final) === 'entregado').length;
+
+  // Show today's orders in the preview (all orders if none have a date)
+  const todayOrders = orders.filter(isToday);
+  const preview     = (todayOrders.length > 0 ? todayOrders : orders).slice(0, 6);
 
   const firstName = user?.nombre?.split(' ')[0] ?? 'Repartidor';
 
@@ -90,91 +70,96 @@ export default function RepartidorHomePage() {
           ))
         ) : (
           <>
-            {/* Total */}
             <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm text-center">
               <div className="w-8 h-8 bg-gray-100 rounded-xl flex items-center justify-center mx-auto mb-2">
                 <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                 </svg>
               </div>
-              <p className="text-2xl font-bold text-gray-900 tabular-nums">{stats.total}</p>
+              <p className="text-2xl font-bold text-gray-900 tabular-nums">{total}</p>
               <p className="text-[11px] text-gray-400 mt-0.5 font-medium">Asignados</p>
             </div>
 
-            {/* Pendientes */}
             <div className="bg-orange-50 rounded-2xl border border-orange-100 p-4 shadow-sm text-center">
               <div className="w-8 h-8 bg-orange-100 rounded-xl flex items-center justify-center mx-auto mb-2">
                 <svg className="w-4 h-4 text-orange-600" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </div>
-              <p className="text-2xl font-bold text-orange-600 tabular-nums">{stats.pendientes}</p>
+              <p className="text-2xl font-bold text-orange-600 tabular-nums">{pendientes}</p>
               <p className="text-[11px] text-orange-500 mt-0.5 font-medium">Pendientes</p>
             </div>
 
-            {/* Entregadas */}
             <div className="bg-green-50 rounded-2xl border border-green-100 p-4 shadow-sm text-center">
               <div className="w-8 h-8 bg-green-100 rounded-xl flex items-center justify-center mx-auto mb-2">
                 <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </div>
-              <p className="text-2xl font-bold text-green-600 tabular-nums">{stats.entregadas}</p>
+              <p className="text-2xl font-bold text-green-600 tabular-nums">{entregadas}</p>
               <p className="text-[11px] text-green-600 mt-0.5 font-medium">Entregados</p>
             </div>
           </>
         )}
       </div>
 
-        {/* Assigned orders preview */}
-        <div>
-          <h2 className="text-base font-bold text-gray-900 mb-3">Pedidos asignados</h2>
-          {ordersList.length === 0 ? (
-            <div className="bg-white rounded-2xl border border-gray-100 p-6 text-center">
-              <p className="text-sm text-gray-400">No hay pedidos asignados por ahora.</p>
-            </div>
-          ) : (
-            <div className="grid gap-3">
-              {ordersList.slice(0, 6).map((o: AnyOrder, i: number) => {
-                const items = (o.detalles ?? []).map(d => ({
-                  nombre:   d.nombre_sku_solicitado ?? d.nombre ?? 'Producto',
-                  cantidad: d.quantity ?? d.cantidad ?? 1,
-                }));
-                const fecha = o.fecha_entrega ?? o.fecha_pedido;
-                return (
-                  <div key={o._id ?? o.id_pedido ?? i} className="bg-white rounded-2xl border border-gray-100 p-4">
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${o.status_final === 'Entregado' ? 'bg-green-100 text-green-700' : 'bg-orange-50 text-orange-700'}`}>
-                          {o.status_final}
-                        </span>
-                        <span className="text-xs text-gray-400 font-mono">{o.id_pedido ?? o._id}</span>
-                      </div>
-                      {fecha && (
-                        <p className="text-xs text-gray-400 shrink-0 ml-3">
-                          {new Date(fecha).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}
-                        </p>
-                      )}
+      {/* Orders preview */}
+      <div>
+        <h2 className="text-base font-bold text-gray-900 mb-3">Pedidos de hoy</h2>
+        {loading ? (
+          <div className="bg-white rounded-2xl border border-gray-100 p-6 text-center">
+            <div className="w-6 h-6 border-2 border-gray-200 border-t-[#E61A27] rounded-full animate-spin mx-auto" />
+          </div>
+        ) : preview.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-gray-100 p-6 text-center">
+            <p className="text-sm text-gray-400">No hay pedidos asignados por ahora.</p>
+          </div>
+        ) : (
+          <div className="grid gap-3">
+            {preview.map((o, i) => {
+              const fecha = o.fecha_entrega ?? o.fecha_pedido;
+              return (
+                <div key={o._id ?? o.id_pedido ?? i} className="bg-white rounded-2xl border border-gray-100 p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2 flex-wrap min-w-0">
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${STATUS_BADGE[o.status_final] ?? 'bg-gray-100 text-gray-600'}`}>
+                        {o.status_final}
+                      </span>
+                      <span className="text-xs text-gray-400 font-mono truncate">{o.id_pedido ?? o._id}</span>
                     </div>
-                    {o.direccion_entrega && (
-                      <p className="text-xs text-gray-500 mt-1.5 truncate">{o.direccion_entrega}</p>
-                    )}
-                    {items.length > 0 && (
-                      <div className="mt-2 space-y-0.5">
-                        {items.map((item, j) => (
-                          <div key={j} className="flex justify-between text-xs text-gray-600">
-                            <span className="truncate mr-2">{item.nombre}</span>
-                            <span className="font-mono text-gray-400 shrink-0">×{item.cantidad}</span>
-                          </div>
-                        ))}
-                      </div>
+                    {fecha && (
+                      <p className="text-xs text-gray-400 shrink-0">{fmtDate(fecha)}</p>
                     )}
                   </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+
+                  {o.direccion_entrega && (
+                    <div className="flex items-start gap-1.5 mt-2">
+                      <svg className="w-3.5 h-3.5 text-gray-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                      </svg>
+                      <p className="text-xs text-gray-500 truncate">{o.direccion_entrega}</p>
+                    </div>
+                  )}
+
+                  {(o.items ?? []).length > 0 && (
+                    <div className="mt-2 space-y-0.5">
+                      {o.items!.slice(0, 2).map((item, j) => (
+                        <div key={j} className="flex justify-between text-xs text-gray-600">
+                          <span className="truncate mr-2">{item.nombre}</span>
+                          <span className="font-mono text-gray-400 shrink-0">×{item.cantidad}</span>
+                        </div>
+                      ))}
+                      {o.items!.length > 2 && (
+                        <p className="text-xs text-gray-400">+{o.items!.length - 2} más</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       {/* Quick links */}
       <div className="grid grid-cols-3 gap-3">
