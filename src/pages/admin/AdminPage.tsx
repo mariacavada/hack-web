@@ -107,8 +107,6 @@ export default function AdminPage() {
     setActiveTab(ADMIN_PATH_TAB[location.pathname] ?? 'pedidos');
   }, [location.pathname]);
 
-  const token = localStorage.getItem('or_token') ?? '';
-  const h = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 
   useEffect(() => {
     const tk = localStorage.getItem('or_token') ?? '';
