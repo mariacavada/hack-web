@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { motion, AnimatePresence } from "framer-motion";
-import { mockProducts } from "./MockProducts";
 import { useCart } from "./CartContext";
+import { useProducts } from "./ProductsContext";
 import { useAuth } from "../../auth/AuthContext";
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
 
@@ -91,20 +91,38 @@ function ConfirmModal({ onClose }: ConfirmModalProps) {
 
 export default function CheckoutPage() {
   const navigate = useNavigate();
-  const { cart, changeQty, clear } = useCart();
-  const { user } = useAuth(); // Consumo del estado global de autenticación
+  const { cart, changeQty, setQty, clear } = useCart();
+  const { user } = useAuth();
+  const { products } = useProducts();
 
   const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [outOfStockSku, setOutOfStockSku] = useState<string | null>(null);
 
-  // Mapeo y filtrado de productos activos en el carrito
-  const items = mockProducts.filter((p) => (cart[p.sku] ?? 0) > 0);
+  const items = products.filter((p) => (cart[p.sku] ?? 0) > 0);
   const subtotal = items.reduce((sum, p) => sum + p.precio * (cart[p.sku] ?? 0), 0);
+
+  const handleItemQtyChange = (sku: string, delta: number) => {
+    if (outOfStockSku === sku) {
+      setOutOfStockSku(null);
+      setError(null);
+    }
+    changeQty(sku, delta);
+  };
+
+  const handleItemRemove = (sku: string) => {
+    if (outOfStockSku === sku) {
+      setOutOfStockSku(null);
+      setError(null);
+    }
+    setQty(sku, 0);
+  };
 
   const handleRealizarPedido = async () => {
     setLoading(true);
     setError(null);
+    setOutOfStockSku(null);
 
     if (!user || !user.token) {
       setError("No hay una sesión activa. Por favor inicia sesión.");
@@ -135,7 +153,25 @@ export default function CheckoutPage() {
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data?.message ?? `Error en el servidor (${res.status})`);
+        const sku = typeof data?.sku === 'string' ? data.sku : null;
+        if (sku) {
+          setOutOfStockSku(sku);
+        }
+
+        const productName = sku ? products.find((p) => p.sku === sku)?.nombre : null;
+        const errorMessage = data?.message
+          ? typeof data.message === 'string'
+            ? data.message
+            : JSON.stringify(data.message)
+          : `Error en el servidor (${res.status})`;
+
+        setError(
+          sku
+            ? `No hay suficiente stock disponible de "${productName ?? sku}" en este CEDIS para completar el pedido.`
+            : errorMessage
+        );
+        setLoading(false);
+        return;
       }
 
       setShowConfirm(true);
@@ -194,18 +230,28 @@ export default function CheckoutPage() {
           <div className="flex-1 w-full bg-white rounded-2xl border border-gray-200 shadow-sm divide-y divide-gray-100 overflow-hidden">
             {items.map((p) => {
               const qty = cart[p.sku] ?? 0;
+              const isOutOfStock = outOfStockSku === p.sku;
               return (
                 <div key={p.sku} className="flex items-center gap-4 px-4 py-3.5 hover:bg-gray-50 transition-colors">
                   <span className="text-2xl shrink-0 select-none">{p.emoji ?? "🥤"}</span>
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-bold text-gray-900 truncate">{p.nombre}</p>
                     <p className="text-[11px] text-gray-400 mt-0.5">${p.precio.toFixed(2)} c/u</p>
+                    {isOutOfStock && (
+                      <p className="text-[10px] mt-1 text-red-600 font-semibold">Sin stock disponible en este CEDIS.</p>
+                    )}
+                    <button
+                      onClick={() => handleItemRemove(p.sku)}
+                      className="mt-1 text-[11px] text-red-600 hover:text-red-800 font-semibold transition-colors"
+                    >
+                      Eliminar artículo
+                    </button>
                   </div>
                   
                   {/* Editable quantity */}
                   <QtyInput
                     qty={qty}
-                    onCommit={n => changeQty(p.sku, n - qty)}
+                    onCommit={n => handleItemQtyChange(p.sku, n - qty)}
                   />
                   
                   <span className="text-xs font-bold text-gray-900 w-16 text-right shrink-0 font-mono">
@@ -224,14 +270,20 @@ export default function CheckoutPage() {
               </h2>
 
               <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
-                {items.map((p) => (
-                  <div key={p.sku} className="flex justify-between text-xs text-gray-600">
-                    <span className="truncate mr-3">
-                      {p.nombre} <span className="font-mono text-gray-400">x{cart[p.sku]}</span>
-                    </span>
-                    <span className="font-medium shrink-0">${(p.precio * (cart[p.sku] ?? 0)).toFixed(2)}</span>
-                  </div>
-                ))}
+                {items.map((p) => {
+                  const isOutOfStock = outOfStockSku === p.sku;
+                  return (
+                    <div key={p.sku} className="flex justify-between text-xs text-gray-600">
+                      <span className="truncate mr-3">
+                        {p.nombre} <span className="font-mono text-gray-400">x{cart[p.sku]}</span>
+                        {isOutOfStock && (
+                          <span className="ml-2 text-[10px] font-semibold text-red-600">(Sin stock)</span>
+                        )}
+                      </span>
+                      <span className="font-medium shrink-0">${(p.precio * (cart[p.sku] ?? 0)).toFixed(2)}</span>
+                    </div>
+                  );
+                })}
               </div>
 
               <div className="border-t border-gray-100 pt-3 space-y-1.5 text-xs text-gray-500">

@@ -3,7 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router';
 import { useAuth } from '../../auth/AuthContext';
 import { useCart } from './CartContext';
-import { mockProducts } from './MockProducts';
+import { useProducts } from './ProductsContext';
+import type { Product } from './types';
 
 const API = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
 
@@ -180,10 +181,12 @@ function OrderDrawer({
 // ── Repeat confirm sheet ──────────────────────────────────────────────────────
 function RepeatConfirmSheet({
   order,
+  products,
   onConfirm,
   onCancel,
 }: {
   order: Order
+  products: Product[]
   onConfirm: () => void
   onCancel: () => void
 }) {
@@ -192,10 +195,10 @@ function RepeatConfirmSheet({
     grouped.map(item => ({
       ...item,
       product:
-        mockProducts.find(p => p.sku === item.sku) ??
-        mockProducts.find(p => p.nombre.toLowerCase() === item.nombre.toLowerCase()),
+        products.find(p => p.sku === item.sku) ??
+        products.find(p => p.nombre.toLowerCase() === item.nombre.toLowerCase()),
     })),
-  [grouped])
+  [grouped, products])
   const unavailableCount = matchedItems.filter(i => !i.product).length
 
   return (
@@ -255,6 +258,7 @@ export default function MisPedidosPage() {
   const navigate             = useNavigate()
   const { user }             = useAuth()
   const { changeQty, clear } = useCart()
+  const { products }         = useProducts()
 
   const [orders, setOrders]       = useState<Order[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -296,8 +300,8 @@ export default function MisPedidosPage() {
     clear()
     for (const item of groupItems(order.items)) {
       const product =
-        mockProducts.find(p => p.sku === item.sku) ??
-        mockProducts.find(p => p.nombre.toLowerCase() === item.nombre.toLowerCase())
+        products.find(p => p.sku === item.sku) ??
+        products.find(p => p.nombre.toLowerCase() === item.nombre.toLowerCase())
       if (product) {
         changeQty(product.sku, item.cantidad)
       }
@@ -463,6 +467,7 @@ export default function MisPedidosPage() {
         {repeatTarget && (
           <RepeatConfirmSheet
             order={repeatTarget}
+            products={products}
             onConfirm={() => handleRepeatConfirm(repeatTarget)}
             onCancel={() => setRepeatTarget(null)}
           />

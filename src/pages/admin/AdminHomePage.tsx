@@ -80,6 +80,7 @@ export default function AdminHomePage() {
   const [orders,    setOrders]    = useState<Order[]>([]);
   const [risk,      setRisk]      = useState<RiskItem[]>([]);
   const [notifs,    setNotifs]    = useState<Notif[]>([]);
+  const [skuNames,  setSkuNames]  = useState<Record<string, string>>({});
   const [loading,   setLoading]   = useState(true);
 
   useEffect(() => {
@@ -89,12 +90,17 @@ export default function AdminHomePage() {
       fetch(`${API}/api/admin/orders`,                      { headers: h }).then(r => r.ok ? r.json() : []),
       fetch(`${API}/api/notifications`,                     { headers: h }).then(r => r.ok ? r.json() : []),
       fetch(`${API}/api/admin/inventory/depletion-risk`,    { headers: h }).then(r => r.ok ? r.json() : []),
+      fetch(`${API}/api/ai/products`,                       { headers: h }).then(r => r.ok ? r.json() : []),
     ])
-      .then(([o, n, ri]) => {
+      .then(([o, n, ri, catalog]) => {
         setOrders(Array.isArray(o) ? o : o?.orders ?? []);
         setNotifs(Array.isArray(n) ? n : n?.notifications ?? []);
         const riskArr: RiskItem[] = Array.isArray(ri) ? ri : ri?.predictions ?? ri?.items ?? [];
         setRisk(riskArr);
+        const catalogArr: any[] = Array.isArray(catalog) ? catalog : catalog?.products ?? [];
+        const nameMap: Record<string, string> = {};
+        catalogArr.forEach((p: any) => { if (p.sku) nameMap[String(p.sku)] = p.nombre ?? p.sku; });
+        setSkuNames(nameMap);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -245,7 +251,7 @@ export default function AdminHomePage() {
                 return (
                   <div key={i}>
                     <div className="flex items-center justify-between mb-1.5">
-                      <p className="text-xs font-semibold text-gray-800 truncate pr-2">{item.nombre ?? item.sku}</p>
+                      <p className="text-xs font-semibold text-gray-800 truncate pr-2">{item.nombre ?? skuNames[String(item.sku)] ?? item.sku}</p>
                       {label != null
                         ? <span className={`text-xs font-bold shrink-0 ${riskTextClass(urgency)}`}>{label}</span>
                         : <span className="text-xs text-gray-300 shrink-0">—</span>

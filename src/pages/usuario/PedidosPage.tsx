@@ -3,26 +3,28 @@ import { useNavigate } from "react-router";
 import { motion, AnimatePresence } from "framer-motion";
 import ProductCard from "./componentes/ProductCard";
 import type { Product } from "./types";
-import { mockProducts, CATEGORY_ICONS } from "./MockProducts";
+import { CATEGORY_ICONS } from "./MockProducts";
 import { useCart } from "./CartContext";
+import { useProducts } from "./ProductsContext";
 
 export default function PedidosPage() {
   const navigate = useNavigate();
   const { cart, add, remove, changeQty, totalItems } = useCart();
+  const { products, loading, error } = useProducts();
 
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState("Todos");
 
-  const totalPrice = mockProducts.reduce((s, p) => s + p.precio * (cart[p.sku] ?? 0), 0);
+  const totalPrice = products.reduce((s, p) => s + p.precio * (cart[p.sku] ?? 0), 0);
 
   const categories = useMemo(() => {
-    const cats = Array.from(new Set(mockProducts.map((p) => p.categoria)));
+    const cats = Array.from(new Set(products.map((p) => p.categoria)));
     return ["Todos", ...cats];
-  }, []);
+  }, [products]);
 
   const grouped = useMemo(() => {
     const q = search.toLowerCase().trim();
-    const filtered = mockProducts.filter((p) => {
+    const filtered = products.filter((p) => {
       const matchSearch = !q || p.nombre.toLowerCase().includes(q);
       const matchCat = activeCategory === "Todos" || p.categoria === activeCategory;
       return matchSearch && matchCat;
@@ -35,6 +37,18 @@ export default function PedidosPage() {
     });
     return result;
   }, [search, activeCategory]);
+
+  if (loading) return (
+    <div className="flex items-center justify-center min-h-screen text-sm text-gray-400">
+      Cargando productos...
+    </div>
+  );
+
+  if (error) return (
+    <div className="flex items-center justify-center min-h-screen text-sm text-red-500">
+      Error al cargar productos: {error}
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900 antialiased">
