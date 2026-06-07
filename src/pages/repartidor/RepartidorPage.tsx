@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'framer-motion';
+import RouteMap from './RouteMap';
 import { useAuth } from '../../auth/AuthContext';
 
 const REP_PATH_TAB: Record<string, 'pedidos' | 'ruta' | 'incidencias' | 'perfil'> = {
@@ -245,7 +246,10 @@ export default function RepartidorPage() {
 
       {/* RUTA */}
       {activeTab === 'ruta' && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+          {/* Map showing stops (mock coordinates when missing) */}
+          <RouteMap stops={route?.stops ?? []} />
+
           {!route ? (
             <div className="bg-white rounded-xl border border-dashed border-gray-300 p-10 text-center space-y-3">
               <p className="text-gray-500 text-sm">No hay ruta activa para hoy.</p>
