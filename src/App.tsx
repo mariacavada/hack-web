@@ -19,7 +19,6 @@ import PedidosPage from './pages/usuario/PedidosPage';
 import CheckoutPage from './pages/usuario/CheckoutPage';
 import MisPedidosPage from './pages/usuario/MisPedidos';
 import SeguirPage from './pages/usuario/SeguirPage';
-import PerfilPage from './pages/usuario/PerfilPage';
 
 const App: React.FC = () => {
   return (
@@ -37,7 +36,6 @@ const App: React.FC = () => {
               <Route path="tienda/checkout" element={<CheckoutPage />} />
               <Route path="pedidos" element={<MisPedidosPage />} />
               <Route path="seguir" element={<SeguirPage />} />
-              <Route path="perfil" element={<PerfilPage />} />
             </Route>
           </Route>
 
@@ -60,7 +58,6 @@ const App: React.FC = () => {
               <Route path="pedidos"     element={<RepartidorPage />} />
               <Route path="ruta"        element={<RepartidorPage />} />
               <Route path="incidencias" element={<RepartidorPage />} />
-              <Route path="perfil"      element={<RepartidorPage />} />
             </Route>
           </Route>
 

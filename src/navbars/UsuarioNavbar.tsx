@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { motion, AnimatePresence } from "framer-motion";
 import tualiLogo from "../assets/logos/logo.png";
+import { useAuth } from "../auth/AuthContext";
 
 // Cart atom — lift this to context/zustand if you need cross-page reactivity.
 // For now, accepts an optional prop so PedidosPage can pass the count in.
@@ -11,17 +12,19 @@ interface NavbarProps {
 
 const navItems = [
   { name: "Inicio",   path: "/usuario" },
-  { name: "Tienda",  path: "/usuario/tienda" },
+  { name: "Tienda",   path: "/usuario/tienda" },
   { name: "Seguir",   path: "/usuario/seguir" },
-  { name: "Pedidos",    path: "/usuario/pedidos" },
-  { name: "Perfil",   path: "/usuario/perfil" },
+  { name: "Pedidos",  path: "/usuario/pedidos" },
 ];
 
 const Navbar = ({ cartCount = 0 }: NavbarProps) => {
   const location = useLocation();
   const navigate  = useNavigate();
+  const { logout } = useAuth();
   const [menuOpen, setMenuOpen]   = useState(false);
   const [isVisible, setIsVisible] = useState(true);
+
+  const handleLogout = () => { logout(); navigate('/', { replace: true }); };
 
   useEffect(() => {
     let lastScrollY = window.scrollY;
@@ -85,17 +88,24 @@ const Navbar = ({ cartCount = 0 }: NavbarProps) => {
           })}
         </div>
 
-        {/* Cart button (desktop) */}
+        {/* Desktop: cart + logout */}
+        <div className="hidden md:flex items-center gap-2 flex-shrink-0">
+        <button
+          onClick={handleLogout}
+          className="text-sm font-semibold text-neutral-500 hover:text-neutral-900 transition-colors px-2"
+        >
+          Salir
+        </button>
         <motion.button
           whileHover={{ scale: 1.04 }}
           whileTap={{ scale: 0.95 }}
           onClick={() => navigate("/usuario/tienda/checkout")}
           className="
-            hidden md:flex items-center gap-2
+            flex items-center gap-2
             bg-red-600 hover:bg-red-700
             text-white text-sm font-bold
             px-4 py-2 rounded-full
-            transition-colors relative flex-shrink-0
+            transition-colors relative
             shadow-sm
           "
         >
@@ -120,6 +130,7 @@ const Navbar = ({ cartCount = 0 }: NavbarProps) => {
             </motion.span>
           )}
         </motion.button>
+        </div>
 
         {/* Mobile: cart icon + hamburger */}
         <div className="md:hidden flex items-center gap-2 pr-1">
@@ -181,6 +192,14 @@ const Navbar = ({ cartCount = 0 }: NavbarProps) => {
                 </Link>
               );
             })}
+            <div className="border-t border-slate-100 mt-1 pt-1">
+              <button
+                onClick={() => { setMenuOpen(false); handleLogout(); }}
+                className="w-full rounded-xl px-4 py-3 text-sm font-medium text-red-600 hover:bg-red-50 transition-all text-left"
+              >
+                Cerrar sesión
+              </button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

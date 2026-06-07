@@ -91,7 +91,7 @@ function ConfirmModal({ onClose }: ConfirmModalProps) {
 
 export default function CheckoutPage() {
   const navigate = useNavigate();
-  const { cart, changeQty, setQty, clear } = useCart();
+  const { cart, changeQty, setQty, clear, fechaEntrega, setFechaEntrega } = useCart();
   const { user } = useAuth();
   const { products } = useProducts();
 
@@ -99,6 +99,10 @@ export default function CheckoutPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [outOfStockSku, setOutOfStockSku] = useState<string | null>(null);
+
+  // Rango de fechas: mínimo hoy, máximo hoy + 30 días
+  const minFecha = (() => { const d = new Date(); d.setDate(d.getDate()); return d.toISOString().slice(0, 10); })();
+  const maxFecha = (() => { const d = new Date(); d.setDate(d.getDate() + 30); return d.toISOString().slice(0, 10); })();
 
   const items = products.filter((p) => (cart[p.sku] ?? 0) > 0);
   const subtotal = items.reduce((sum, p) => sum + p.precio * (cart[p.sku] ?? 0), 0);
@@ -117,6 +121,10 @@ export default function CheckoutPage() {
       setError(null);
     }
     setQty(sku, 0);
+  };
+
+  const handleFechaChange = (newFecha: string) => {
+    setFechaEntrega(newFecha);
   };
 
   const handleRealizarPedido = async () => {
@@ -144,9 +152,10 @@ export default function CheckoutPage() {
           Authorization: `Bearer ${user.token}`, // Inyección limpia del token JWT verificado
         },
         body: JSON.stringify({
-          cedis_id: "3012",
+          cedis_id: "3501",
           subtotal,
           total: subtotal,
+          fecha_entrega: fechaEntrega,
           items: orderItems,
         }),
       });
@@ -305,6 +314,20 @@ export default function CheckoutPage() {
                   </span>
                   <span className="text-[9px] font-bold text-gray-400 block -mt-1">MXN</span>
                 </div>
+              </div>
+
+              {/* Fecha de entrega selector */}
+              <div className="pt-3">
+                <label className="text-xs font-bold text-gray-700 block mb-1">Fecha de entrega</label>
+                <input
+                  type="date"
+                  min={minFecha}
+                  max={maxFecha}
+                  value={fechaEntrega}
+                  onChange={e => handleFechaChange(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white"
+                />
+                <p className="text-xs text-gray-400 mt-1">Selecciona la fecha de entrega (mín: {minFecha}, máx: {maxFecha})</p>
               </div>
 
               {error && (

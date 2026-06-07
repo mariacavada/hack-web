@@ -2,6 +2,14 @@ import { useEffect, useRef, useMemo, useState } from 'react'
 import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 
+function fmtEta(raw?: string): string | null {
+  if (!raw) return null
+  const d = new Date(raw)
+  if (isNaN(d.getTime())) return raw
+  return d.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' }) +
+    ' · ' + d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
+}
+
 export type Stop = {
   order_id?: string
   id_pedido?: string
@@ -188,20 +196,21 @@ export default function RouteMap({
             const hasCoord     = stopCoords[i] !== null
             const isCompleting = completingStop === i
             const showActions  = canComplete && !done
+            const etaFmt       = fmtEta(stop.eta)
 
             return (
-              <div key={i} className={`transition-colors ${focused ? 'bg-violet-50' : ''}`}>
+              <div key={i} className={`transition-colors ${focused ? 'bg-violet-50' : done ? 'bg-gray-50/60' : ''}`}>
 
                 {/* Tappable row → zoom */}
                 <button
                   onClick={() => hasCoord && setFocusedIndex(focused ? null : i)}
-                  className={`w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors ${
+                  className={`w-full flex items-start gap-3 px-4 py-4 text-left transition-colors ${
                     hasCoord ? 'hover:bg-black/[0.02] active:bg-black/[0.04]' : 'cursor-default'
                   }`}
                 >
-                  {/* Stop number / check */}
-                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-extrabold shrink-0 tabular-nums transition-colors ${
-                    done    ? 'bg-green-100 text-green-700'
+                  {/* Stop number / check bubble */}
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-extrabold shrink-0 tabular-nums mt-0.5 transition-colors ${
+                    done     ? 'bg-green-100 text-green-700'
                     : focused ? 'bg-violet-100 text-violet-700'
                     :          'bg-[#E61A27]/10 text-[#E61A27]'
                   }`}>
@@ -212,29 +221,45 @@ export default function RouteMap({
                     ) : (stop.stop_number ?? i + 1)}
                   </div>
 
-                  {/* Name + address */}
-                  <div className="flex-1 min-w-0">
+                  {/* Main info */}
+                  <div className="flex-1 min-w-0 space-y-0.5">
+                    {/* Order ID pill */}
+                    {stop.id_pedido && (
+                      <span className="inline-block text-[10px] font-mono text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-md leading-none mb-1">
+                        {stop.id_pedido}
+                      </span>
+                    )}
                     <p className={`text-sm font-semibold truncate transition-colors ${
-                      done ? 'text-gray-400' : focused ? 'text-violet-900' : 'text-gray-900'
+                      done ? 'text-gray-400 line-through' : focused ? 'text-violet-900' : 'text-gray-900'
                     }`}>
-                      {stop.cliente ?? stop.id_pedido ?? `Parada ${i + 1}`}
+                      {stop.cliente || `Parada ${stop.stop_number ?? i + 1}`}
                     </p>
                     {stop.direccion && (
-                      <p className="text-xs text-gray-400 truncate mt-0.5">{stop.direccion}</p>
+                      <p className="text-xs text-gray-400 truncate flex items-center gap-1">
+                        <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                        </svg>
+                        {stop.direccion}
+                      </p>
                     )}
-                    {stop.eta && !done && (
-                      <p className="text-xs text-gray-400 mt-0.5">ETA: {stop.eta}</p>
+                    {etaFmt && !done && (
+                      <p className="text-xs text-orange-500 font-medium flex items-center gap-1">
+                        <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        {etaFmt}
+                      </p>
                     )}
                   </div>
 
-                  {/* Right label */}
-                  <span className={`text-xs font-semibold shrink-0 transition-colors ${
-                    done      ? 'text-green-600'
-                    : focused  ? 'text-violet-600'
-                    : !hasCoord ? 'text-gray-300'
-                    :            'text-orange-500'
+                  {/* Status badge */}
+                  <span className={`text-[11px] font-bold px-2 py-1 rounded-full shrink-0 mt-0.5 ${
+                    done      ? 'bg-green-100 text-green-700'
+                    : focused  ? 'bg-violet-100 text-violet-700'
+                    : !hasCoord ? 'bg-gray-100 text-gray-400'
+                    :            'bg-orange-50 text-orange-600'
                   }`}>
-                    {done ? 'Hecho' : focused ? 'Ver ↑' : !hasCoord ? '—' : 'Pendiente'}
+                    {done ? 'Entregado' : focused ? 'Ver ↑' : !hasCoord ? 'Sin GPS' : 'Pendiente'}
                   </span>
                 </button>
 
@@ -253,13 +278,13 @@ export default function RouteMap({
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                           </svg>
-                          Entregado
+                          Confirmar entrega
                         </>
                       )}
                     </button>
                     <button
                       onClick={() => onMissingStop?.(i, stop.order_id ?? stop.id_pedido ?? '')}
-                      className="h-10 px-4 rounded-xl border border-red-200 text-red-500 text-sm font-semibold hover:bg-red-50 transition-colors"
+                      className="h-10 px-3 rounded-xl border border-red-200 text-red-500 text-sm font-semibold hover:bg-red-50 transition-colors"
                     >
                       Faltante
                     </button>

@@ -63,6 +63,7 @@ interface Order {
   id_pedido: string;
   status_final: string;
   fecha_pedido: string;
+  fecha_entrega?: string;
   subtotal?: number;
   total: number;
   items: OrderItem[];
@@ -89,6 +90,7 @@ export default function SeguirPage() {
           id_pedido:        o.id_pedido ?? o._id,
           status_final:     normalizeStatus(o.status_final ?? 'pendiente'),
           fecha_pedido:     o.fecha_pedido ?? o.createdAt ?? new Date().toISOString(),
+          fecha_entrega:    o.fecha_entrega,
           subtotal:         o.subtotal ?? o.SubTotal ?? o.total ?? 0,
           total:            o.total ?? o.Total ?? o.subtotal ?? 0,
           items:            (o.items ?? []).map((i: any) => ({
@@ -224,8 +226,23 @@ export default function SeguirPage() {
                   </div>
 
                   {/* Delivery info */}
-                  {(selected.repartidor?.nombre || selected.direccion_entrega) && (
+                  {(selected.repartidor?.nombre || selected.direccion_entrega || selected.fecha_entrega) && (
                     <div className="bg-white rounded-2xl border border-gray-100 p-4 space-y-3">
+                      {selected.fecha_entrega && (
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-xl bg-green-50 flex items-center justify-center shrink-0">
+                            <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 0v4m-10 2h12a2 2 0 012 2v10a2 2 0 01-2 2H6a2 2 0 01-2-2V9a2 2 0 012-2zm0 0V5a2 2 0 012-2h4a2 2 0 012 2v2" />
+                            </svg>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Fecha de entrega</p>
+                            <p className="text-sm font-semibold text-gray-900">
+                              {new Date(selected.fecha_entrega).toLocaleDateString('es-MX', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                            </p>
+                          </div>
+                        </div>
+                      )}
                       {selected.repartidor?.nombre && (
                         <div className="flex items-center gap-3">
                           <div className="w-9 h-9 rounded-xl bg-orange-50 flex items-center justify-center shrink-0">

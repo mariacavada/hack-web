@@ -9,7 +9,6 @@ const navItems = [
   { name: 'Pedidos',     path: '/repartidor/pedidos' },
   { name: 'Ruta',        path: '/repartidor/ruta' },
   { name: 'Incidencias', path: '/repartidor/incidencias' },
-  { name: 'Perfil',      path: '/repartidor/perfil' },
 ];
 
 const RepartidorNavbar = () => {

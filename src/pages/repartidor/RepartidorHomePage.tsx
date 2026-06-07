@@ -5,7 +5,16 @@ import { useAuth } from '../../auth/AuthContext';
 
 const API = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
 
-interface AnyOrder { status_final: string; }
+interface AnyOrder {
+  _id?: string;
+  id_pedido?: string;
+  status_final: string;
+  total?: number;
+  fecha_pedido?: string;
+  fecha_entrega?: string;
+  direccion_entrega?: string;
+  detalles?: { nombre_sku_solicitado?: string; nombre?: string; quantity?: number; cantidad?: number }[];
+}
 
 const quickLinks = [
   {
@@ -35,21 +44,13 @@ const quickLinks = [
     ),
     iconBg: 'bg-orange-50 text-orange-600',
   },
-  {
-    label: 'Mi perfil',
-    sub: 'Ver mi información',
-    path: '/repartidor/perfil',
-    icon: (
-      <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-    ),
-    iconBg: 'bg-gray-100 text-gray-600',
-  },
 ];
 
 export default function RepartidorHomePage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [stats, setStats] = useState({ total: 0, pendientes: 0, entregadas: 0 });
+  const [ordersList, setOrdersList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -57,15 +58,14 @@ export default function RepartidorHomePage() {
     if (!token) { setLoading(false); return; }
     fetch(`${API}/api/driver/orders`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : [])
-      .then((data: any) => {
-        // Backend returns [{ order: {...}, detalles: [], tracking: {} }] — extract nested order
-        const raw: any[] = Array.isArray(data) ? data : (data?.orders ?? []);
-        const orders = raw.map(item => item?.order ?? item);
-        const status = (o: any) => (o?.status_final ?? '').toLowerCase();
+      .then((data: AnyOrder[] | { orders: AnyOrder[] }) => {
+        const orders: AnyOrder[] = Array.isArray(data) ? data : (data as any)?.orders ?? [];
+        setOrdersList(orders);
+        const st = (o: AnyOrder) => (o.status_final ?? '').toLowerCase();
         setStats({
           total:      orders.length,
-          pendientes: orders.filter(o => !['entregado', 'cancelado'].includes(status(o))).length,
-          entregadas: orders.filter(o => status(o) === 'entregado').length,
+          pendientes: orders.filter(o => !['entregado', 'cancelado'].includes(st(o))).length,
+          entregadas: orders.filter(o => st(o) === 'entregado').length,
         });
       })
       .catch(() => {})
@@ -126,8 +126,58 @@ export default function RepartidorHomePage() {
         )}
       </div>
 
+        {/* Assigned orders preview */}
+        <div>
+          <h2 className="text-base font-bold text-gray-900 mb-3">Pedidos asignados</h2>
+          {ordersList.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-gray-100 p-6 text-center">
+              <p className="text-sm text-gray-400">No hay pedidos asignados por ahora.</p>
+            </div>
+          ) : (
+            <div className="grid gap-3">
+              {ordersList.slice(0, 6).map((o: AnyOrder, i: number) => {
+                const items = (o.detalles ?? []).map(d => ({
+                  nombre:   d.nombre_sku_solicitado ?? d.nombre ?? 'Producto',
+                  cantidad: d.quantity ?? d.cantidad ?? 1,
+                }));
+                const fecha = o.fecha_entrega ?? o.fecha_pedido;
+                return (
+                  <div key={o._id ?? o.id_pedido ?? i} className="bg-white rounded-2xl border border-gray-100 p-4">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${o.status_final === 'Entregado' ? 'bg-green-100 text-green-700' : 'bg-orange-50 text-orange-700'}`}>
+                          {o.status_final}
+                        </span>
+                        <span className="text-xs text-gray-400 font-mono">{o.id_pedido ?? o._id}</span>
+                      </div>
+                      {fecha && (
+                        <p className="text-xs text-gray-400 shrink-0 ml-3">
+                          {new Date(fecha).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}
+                        </p>
+                      )}
+                    </div>
+                    {o.direccion_entrega && (
+                      <p className="text-xs text-gray-500 mt-1.5 truncate">{o.direccion_entrega}</p>
+                    )}
+                    {items.length > 0 && (
+                      <div className="mt-2 space-y-0.5">
+                        {items.map((item, j) => (
+                          <div key={j} className="flex justify-between text-xs text-gray-600">
+                            <span className="truncate mr-2">{item.nombre}</span>
+                            <span className="font-mono text-gray-400 shrink-0">×{item.cantidad}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
       {/* Quick links */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         {quickLinks.map((item, i) => (
           <motion.button
             key={item.path}
