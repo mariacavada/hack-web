@@ -35,11 +35,14 @@ interface DriverOrderResponse {
 const STATUS_NORMALIZE: Record<string, string> = {
   pendiente:        'Pendiente',
   confirmado:       'Confirmado',
+  asignado:         'Asignado',
   en_preparacion:   'En preparación',
   'en preparación': 'En preparación',
+  preparando:       'En preparación',
   en_camino:        'En camino',
   'en camino':      'En camino',
   entregado:        'Entregado',
+  incompleto:       'Incompleto',
   cancelado:        'Cancelado',
 };
 
@@ -209,7 +212,7 @@ export default function RepartidorPage() {
   // ── Order-level status update ──────────────────────────────────────────────
   // The API uses id_pedido (string), not mongo _id
   const updateOrderStatus = async (order: AssignedOrder, status: 'en_camino' | 'entregado') => {
-    const apiId = order.id_pedido ?? order._id;
+    const apiId = order._id; // backend queries by MongoDB _id, not id_pedido
     setUpdatingId(order._id);
     try {
       const res = await fetch(`${API}/api/driver/orders/${apiId}/status`, {
@@ -418,7 +421,7 @@ export default function RepartidorPage() {
                 )}
 
                 <div className="px-4 pb-4 flex flex-col gap-2">
-                  {o.status_final === 'Confirmado' && (
+                  {(o.status_final === 'Confirmado' || o.status_final === 'Asignado') && (
                     <button
                       onClick={() => updateOrderStatus(o, 'en_camino')}
                       disabled={isUpdating}
@@ -455,7 +458,7 @@ export default function RepartidorPage() {
                     </button>
                   )}
                   <button
-                    onClick={() => { setActiveTab('incidencias'); setIncidentOrder(o.id_pedido ?? o._id); }}
+                    onClick={() => { setActiveTab('incidencias'); setIncidentOrder(o._id); }}
                     className="w-full h-11 rounded-xl border border-gray-200 text-sm font-medium text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition-colors"
                   >
                     Reportar incidencia
@@ -624,7 +627,7 @@ export default function RepartidorPage() {
                 >
                   <option value="">Selecciona un pedido</option>
                   {orders.map(o => (
-                    <option key={o._id} value={o.id_pedido ?? o._id}>{o.id_pedido ?? o._id}</option>
+                    <option key={o._id} value={o._id}>{o.id_pedido ?? o._id}</option>
                   ))}
                 </select>
               </div>

@@ -9,6 +9,7 @@ import AdminHomePage from './pages/admin/AdminHomePage';
 import AdminAnaliticasPage from './pages/admin/AdminAnaliticasPage';
 import AdminUsuariosPage from './pages/admin/AdminUsuariosPage';
 import AdminCedisPage from './pages/admin/AdminCedisPage';
+import AdminPrediccionesPage from './pages/admin/AdminPrediccionesPage';
 import RepartidorPage from './pages/repartidor/RepartidorPage';
 import RepartidorHomePage from './pages/repartidor/RepartidorHomePage';
 import AdminLayout from './layouts/AdminLayout';
@@ -45,7 +46,7 @@ const App: React.FC = () => {
             <Route path="/admin" element={<AdminLayout />}>
               <Route index element={<AdminHomePage />} />
               <Route path="pedidos"      element={<AdminPage />} />
-              <Route path="predicciones" element={<AdminPage />} />
+              <Route path="predicciones" element={<AdminPrediccionesPage />} />
               <Route path="analiticas"   element={<AdminAnaliticasPage />} />
               <Route path="usuarios"     element={<AdminUsuariosPage />} />
               <Route path="cedis"        element={<AdminCedisPage />} />

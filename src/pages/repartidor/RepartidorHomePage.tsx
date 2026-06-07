@@ -57,12 +57,15 @@ export default function RepartidorHomePage() {
     if (!token) { setLoading(false); return; }
     fetch(`${API}/api/driver/orders`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : [])
-      .then((data: AnyOrder[] | { orders: AnyOrder[] }) => {
-        const orders: AnyOrder[] = Array.isArray(data) ? data : (data as any)?.orders ?? [];
+      .then((data: any) => {
+        // Backend returns [{ order: {...}, detalles: [], tracking: {} }] — extract nested order
+        const raw: any[] = Array.isArray(data) ? data : (data?.orders ?? []);
+        const orders = raw.map(item => item?.order ?? item);
+        const status = (o: any) => (o?.status_final ?? '').toLowerCase();
         setStats({
           total:      orders.length,
-          pendientes: orders.filter(o => !['Entregado', 'Cancelado'].includes(o.status_final)).length,
-          entregadas: orders.filter(o => o.status_final === 'Entregado').length,
+          pendientes: orders.filter(o => !['entregado', 'cancelado'].includes(status(o))).length,
+          entregadas: orders.filter(o => status(o) === 'entregado').length,
         });
       })
       .catch(() => {})

@@ -87,20 +87,34 @@ export default function AdminHomePage() {
     const token = localStorage.getItem('or_token') ?? '';
     const h = { Authorization: `Bearer ${token}` };
     Promise.all([
-      fetch(`${API}/api/admin/orders`,                      { headers: h }).then(r => r.ok ? r.json() : []),
+      fetch(`${API}/api/admin/orders?limit=500`,             { headers: h }).then(r => r.ok ? r.json() : []),
       fetch(`${API}/api/notifications`,                     { headers: h }).then(r => r.ok ? r.json() : []),
       fetch(`${API}/api/admin/inventory/depletion-risk`,    { headers: h }).then(r => r.ok ? r.json() : []),
-      fetch(`${API}/api/ai/products`,                       { headers: h }).then(r => r.ok ? r.json() : []),
+      fetch(`${API}/api/cedis`, { headers: h })
+        .then(r => r.ok ? r.json() : [])
+        .then(async (cedis: any[]) => {
+          const list = Array.isArray(cedis) ? cedis : [];
+          const stocks = await Promise.all(
+            list.map((c: any) =>
+              fetch(`${API}/api/cedis/${c.cedis_id}/stock`, { headers: h })
+                .then(r => r.ok ? r.json() : { productos: [] })
+                .catch(() => ({ productos: [] }))
+            )
+          );
+          const map: Record<string, string> = {};
+          stocks.forEach((s: any) => {
+            (s.productos ?? []).forEach((p: any) => { if (p.sku && p.nombre) map[String(p.sku)] = p.nombre; });
+          });
+          return map;
+        })
+        .catch(() => ({} as Record<string, string>)),
     ])
-      .then(([o, n, ri, catalog]) => {
+      .then(([o, n, ri, nameMap]) => {
         setOrders(Array.isArray(o) ? o : o?.orders ?? []);
         setNotifs(Array.isArray(n) ? n : n?.notifications ?? []);
         const riskArr: RiskItem[] = Array.isArray(ri) ? ri : ri?.predictions ?? ri?.items ?? [];
         setRisk(riskArr);
-        const catalogArr: any[] = Array.isArray(catalog) ? catalog : catalog?.products ?? [];
-        const nameMap: Record<string, string> = {};
-        catalogArr.forEach((p: any) => { if (p.sku) nameMap[String(p.sku)] = p.nombre ?? p.sku; });
-        setSkuNames(nameMap);
+        setSkuNames(nameMap as Record<string, string>);
       })
       .catch(() => {})
       .finally(() => setLoading(false));

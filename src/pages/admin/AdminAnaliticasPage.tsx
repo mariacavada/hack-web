@@ -31,26 +31,6 @@ interface AnyUser {
   role?: string;
 }
 
-interface RiskItem {
-  sku: string;
-  nombre?: string;
-  probabilidad?: number;
-  confianza?: number;
-  horas_estimadas?: number;
-  dias_estimados_agotamiento?: number;
-  nivel?: string;
-  nivel_alerta?: string;
-  stock_actual?: number;
-  cantidad_reorden_sugerida?: number;
-}
-
-interface LowStockItem {
-  sku: string;
-  nombre?: string;
-  stock_actual?: number;
-  stock_minimo?: number;
-}
-
 /* ── Helpers ─────────────────────────────────────────────────────────────── */
 function sectionTitle(title: string, sub?: string) {
   return (
@@ -63,41 +43,27 @@ function sectionTitle(title: string, sub?: string) {
 
 /* ── Main component ──────────────────────────────────────────────────────── */
 export default function AdminAnaliticasPage() {
-  const [orders,    setOrders]    = useState<AnyOrder[]>([]);
-  const [risk,      setRisk]      = useState<RiskItem[]>([]);
-  const [lowStock,  setLowStock]  = useState<LowStockItem[]>([]);
-  const [skuNames,  setSkuNames]  = useState<Record<string, string>>({});
-  const [users,     setUsers]     = useState<AnyUser[]>([]);
-  const [loading,   setLoading]   = useState(true);
+  const [orders,  setOrders]  = useState<AnyOrder[]>([]);
+  const [users,   setUsers]   = useState<AnyUser[]>([]);
+  const [loading, setLoading] = useState(true);
 
   const token = localStorage.getItem('or_token') ?? '';
   const h = { Authorization: `Bearer ${token}` };
 
   useEffect(() => {
-    Promise.all([
-      fetch(`${API}/api/admin/orders`,                    { headers: h }).then(r => r.ok ? r.json() : []),
-      fetch(`${API}/api/admin/inventory/depletion-risk`,  { headers: h }).then(r => r.ok ? r.json() : []),
-      fetch(`${API}/api/admin/inventory/low-stock`,       { headers: h }).then(r => r.ok ? r.json() : []),
-      fetch(`${API}/api/ai/products`,                     { headers: h }).then(r => r.ok ? r.json() : []),
-      fetch(`${API}/api/admin/users`,                     { headers: h }).then(r => r.ok ? r.json() : []),
-    ])
-      .then(async ([o, ri, ls, catalog, u]) => {
-        const usersArr: AnyUser[] = Array.isArray(u) ? u : u?.users ?? [];
+    (async () => {
+      try {
+        const [o, u] = await Promise.all([
+          fetch(`${API}/api/admin/orders`, { headers: h }).then(r => r.ok ? r.json() : []),
+          fetch(`${API}/api/admin/users`,  { headers: h }).then(r => r.ok ? r.json() : {}),
+        ]);
+
+        const usersArr: AnyUser[] = Array.isArray(u) ? u : (u as any)?.users ?? [];
         setUsers(usersArr);
-        const rawOrders: AnyOrder[] = Array.isArray(o) ? o : o?.orders ?? [];
-        const riskArr = Array.isArray(ri) ? ri : ri?.items ?? ri?.predictions ?? [];
-        const lsArr   = Array.isArray(ls) ? ls : ls?.items ?? [];
 
-        // Build SKU → nombre map from product catalog
-        const catalogArr: any[] = Array.isArray(catalog) ? catalog : catalog?.products ?? [];
-        const nameMap: Record<string, string> = {};
-        catalogArr.forEach((p: any) => { if (p.sku) nameMap[String(p.sku)] = p.nombre ?? p.sku; });
-        setSkuNames(nameMap);
+        const rawOrders: AnyOrder[] = Array.isArray(o) ? o : (o as any)?.orders ?? [];
 
-        setRisk(riskArr);
-        setLowStock(lsArr);
-
-        // Fetch detalles for up to 20 orders to build product sales pie chart
+        // Enrich orders with item names from order details (sample of 20)
         const sample = rawOrders.slice(0, 20);
         const details = await Promise.all(
           sample.map(order =>
@@ -112,7 +78,7 @@ export default function AdminAnaliticasPage() {
             (d?.order?._id ?? d?._id) === order._id
           );
           if (!detail) return order;
-          const detalles: any[] = detail.detalles ?? detail.items ?? [];
+          const detalles: any[] = detail.detalles ?? detail.items ?? detail.productos ?? [];
           return {
             ...order,
             items: detalles.map((it: any) => ({
@@ -123,9 +89,12 @@ export default function AdminAnaliticasPage() {
         });
 
         setOrders(enriched);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+      } catch (_) {
+        // silently ignore fetch errors
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, []);
 
   /* ── Derived data ─────────────────────────────────────────────────────── */
@@ -175,10 +144,7 @@ export default function AdminAnaliticasPage() {
       .slice(-14);
   })();
 
-  const resolveName = (sku: string, nombre?: string) =>
-    (nombre ?? skuNames[String(sku)] ?? sku).slice(0, 22);
-
-  // 5. Top clientes por gasto
+  // 4. Top clientes por gasto
   const topClientes = (() => {
     const spend: Record<string, number> = {};
     const count: Record<string, number> = {};
@@ -200,35 +166,6 @@ export default function AdminAnaliticasPage() {
       .slice(0, 5);
   })();
 
-  // 4. Stock predictivo — días hasta agotamiento
-  const stockRisk = risk
-    .map(r => ({
-      name:  resolveName(r.sku, r.nombre),
-      dias:  r.dias_estimados_agotamiento ?? (r.horas_estimadas != null ? +(r.horas_estimadas / 24).toFixed(1) : 0),
-      nivel: (r.nivel_alerta ?? r.nivel ?? '').toLowerCase(),
-    }))
-    .sort((a, b) => a.dias - b.dias)
-    .slice(0, 8);
-
-  // Usa low-stock endpoint; si está vacío, cae en depletion-risk items
-  const lowStockSource: { sku: string; nombre?: string; stock_actual?: number; stock_minimo?: number }[] =
-    lowStock.length > 0
-      ? lowStock
-      : risk.map(r => ({
-          sku:          r.sku,
-          nombre:       r.nombre,
-          stock_actual: r.stock_actual ?? 0,
-          stock_minimo: r.cantidad_reorden_sugerida ?? 0,
-        }));
-
-  const lowStockChart = lowStockSource
-    .map(ls => ({
-      name:   resolveName(ls.sku, ls.nombre),
-      actual: ls.stock_actual ?? 0,
-      minimo: ls.stock_minimo ?? 0,
-    }))
-    .slice(0, 8);
-
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -245,7 +182,7 @@ export default function AdminAnaliticasPage() {
       </div>
 
       {/* KPI rápido */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 gap-4">
         <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm text-center">
           <p className="text-3xl font-bold text-gray-900">{efficiency}%</p>
           <p className="text-xs text-gray-400 mt-1">Eficiencia de entrega</p>
@@ -253,10 +190,6 @@ export default function AdminAnaliticasPage() {
         <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm text-center">
           <p className="text-3xl font-bold text-gray-900">{delivered}</p>
           <p className="text-xs text-gray-400 mt-1">Pedidos entregados</p>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm text-center">
-          <p className="text-3xl font-bold text-[#E61A27]">{risk.length}</p>
-          <p className="text-xs text-gray-400 mt-1">Productos en riesgo crítico</p>
         </div>
       </div>
 
@@ -385,76 +318,7 @@ export default function AdminAnaliticasPage() {
         )}
       </div>
 
-      {/* Row 3: Stock predictivo */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-        {/* Días hasta agotamiento */}
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-          {sectionTitle('Stock predictivo — cuándo se acaba', 'Días estimados hasta agotamiento por SKU')}
-          {stockRisk.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center py-10">Sin productos en riesgo crítico</p>
-          ) : (
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={stockRisk} layout="vertical" margin={{ left: 10 }}>
-                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f3f4f6" />
-                <XAxis
-                  type="number"
-                  tick={{ fontSize: 11 }}
-                  label={{ value: 'días restantes', position: 'insideBottomRight', offset: -5, fontSize: 10, fill: '#9ca3af' }}
-                />
-                <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={120} />
-                <Tooltip
-                  contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }}
-                  formatter={(v: any) => [v === 0 ? 'Agotado' : `${v} días`, 'Días restantes']}
-                />
-                <Bar
-                  dataKey="dias"
-                  name="Días restantes"
-                  radius={[0, 4, 4, 0]}
-                  minPointSize={6}
-                  shape={(props: any) => {
-                    const { x, y, width, height, dias } = props;
-                    const fill = dias === 0 ? '#EF4444' : dias < 3 ? '#F97316' : dias < 7 ? '#F59E0B' : '#10B981';
-                    return <rect x={x} y={y} width={Math.max(width, 6)} height={height} rx={4} ry={4} fill={fill} />;
-                  }}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-
-          {/* Leyenda de colores */}
-          <div className="flex gap-4 mt-3 text-xs text-gray-500">
-            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block" /> Agotado</span>
-            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-orange-500 inline-block" /> &lt;3 días</span>
-            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-yellow-500 inline-block" /> &lt;7 días</span>
-            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-green-500 inline-block" /> 7+ días</span>
-          </div>
-        </div>
-
-        {/* Stock actual vs mínimo */}
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-          {sectionTitle('Stock actual vs mínimo requerido', 'Productos bajo el umbral de stock seguro')}
-          {lowStockChart.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center py-10">Sin alertas de bajo stock</p>
-          ) : (
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={lowStockChart} layout="vertical" margin={{ left: 10 }}>
-                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f3f4f6" />
-                <XAxis type="number" tick={{ fontSize: 11 }} />
-                <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={100} />
-                <Tooltip
-                  contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }}
-                />
-                <Legend formatter={(v) => <span style={{ fontSize: 11, color: '#6b7280' }}>{v === 'actual' ? 'Stock actual' : 'Stock mínimo'}</span>} />
-                <Bar dataKey="actual" name="actual" fill="#FCA5A5" radius={[0, 4, 4, 0]} />
-                <Bar dataKey="minimo" name="minimo" fill="#E5E7EB" radius={[0, 4, 4, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-      </div>
-
-      {/* Row 4: Top clientes por gasto */}
+      {/* Row 3: Top clientes por gasto */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
         {sectionTitle('Top clientes por gasto', 'Clientes con mayor volumen de compra acumulado')}
         {topClientes.length === 0 ? (
