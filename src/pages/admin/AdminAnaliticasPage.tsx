@@ -6,29 +6,44 @@ import {
 } from 'recharts';
 
 const API = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
-
 const COLORS = ['#E61A27', '#F87171', '#FCA5A5', '#FBBFCA', '#FB923C', '#F59E0B', '#8B5CF6', '#EC4899'];
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
+interface Stats {
+  total:         number;
+  hoy:           number;
+  ayer:          number;
+  activos:       number;
+  pendientes:    number;
+  entregados:    number;
+  cancelados:    number;
+  incompletos:   number;
+  nivel_servicio: number;
+  revenue_total: number;
+  por_status:    Record<string, number>;
+}
 interface AnyOrder {
   _id: string;
   status_final: string;
   customer_id?: string;
   total?: number;
   subtotal?: number;
-  items?: { nombre?: string; cantidad?: number }[];
-  createdAt?: string;
+  valor_pedido?: number;
   fecha_pedido?: string;
-  updatedAt?: string;
+  created_at?: string;
 }
-
 interface AnyUser {
   _id: string;
   customer_id?: string;
   nombre_negocio?: string;
   nombre?: string;
   email?: string;
-  role?: string;
+}
+interface ProductSale {
+  sku: string;
+  productName?: string;
+  quantity?: number;
+  percentage?: number;
 }
 
 /* ── Helpers ─────────────────────────────────────────────────────────────── */
@@ -41,130 +56,109 @@ function sectionTitle(title: string, sub?: string) {
   );
 }
 
-/* ── Main component ──────────────────────────────────────────────────────── */
-export default function AdminAnaliticasPage() {
-  const [orders,  setOrders]  = useState<AnyOrder[]>([]);
-  const [users,   setUsers]   = useState<AnyUser[]>([]);
-  const [loading, setLoading] = useState(true);
+function KPICard({ label, value, sub, accent = false }: { label: string; value: string | number; sub?: string; accent?: boolean }) {
+  return (
+    <div className={`rounded-xl border p-5 shadow-sm text-center ${accent ? 'bg-[#E61A27] border-[#C5002E]' : 'bg-white border-gray-200'}`}>
+      <p className={`text-3xl font-bold ${accent ? 'text-white' : 'text-gray-900'}`}>{value}</p>
+      <p className={`text-xs mt-1 ${accent ? 'text-red-100' : 'text-gray-400'}`}>{label}</p>
+      {sub && <p className={`text-xs font-medium mt-0.5 ${accent ? 'text-red-200' : 'text-gray-400'}`}>{sub}</p>}
+    </div>
+  );
+}
 
-  const token = localStorage.getItem('or_token') ?? '';
-  const h = { Authorization: `Bearer ${token}` };
+const STATUS_COLOR: Record<string, string> = {
+  entregado:   '#10B981',
+  en_camino:   '#F97316',
+  preparando:  '#8B5CF6',
+  asignado:    '#3B82F6',
+  recibido:    '#60A5FA',
+  confirmado:  '#93C5FD',
+  pendiente:   '#F59E0B',
+  incompleto:  '#FCD34D',
+  cancelado:   '#EF4444',
+};
+
+/* ── Component ───────────────────────────────────────────────────────────── */
+export default function AdminAnaliticasPage() {
+  const [stats,        setStats]        = useState<Stats | null>(null);
+  const [orders,       setOrders]       = useState<AnyOrder[]>([]);
+  const [users,        setUsers]        = useState<AnyUser[]>([]);
+  const [productSales, setProductSales] = useState<ProductSale[]>([]);
+  const [loading,      setLoading]      = useState(true);
 
   useEffect(() => {
+    const token = localStorage.getItem('or_token') ?? '';
+    const h = { Authorization: `Bearer ${token}` };
+
     (async () => {
       try {
-        const [o, u] = await Promise.all([
-          fetch(`${API}/api/admin/orders`, { headers: h }).then(r => r.ok ? r.json() : []),
-          fetch(`${API}/api/admin/users`,  { headers: h }).then(r => r.ok ? r.json() : {}),
+        const [st, o, u, ps] = await Promise.all([
+          fetch(`${API}/api/admin/stats`,              { headers: h }).then(r => r.ok ? r.json() : null),
+          fetch(`${API}/api/admin/orders?limit=500`,   { headers: h }).then(r => r.ok ? r.json() : {} as any),
+          fetch(`${API}/api/admin/users?limit=500`,    { headers: h }).then(r => r.ok ? r.json() : {} as any),
+          fetch(`${API}/api/dashboard/product-sales`,  { headers: h }).then(r => r.ok ? r.json() : []).catch(() => []),
         ]);
 
-        const usersArr: AnyUser[] = Array.isArray(u) ? u : (u as any)?.users ?? [];
-        setUsers(usersArr);
-
-        const rawOrders: AnyOrder[] = Array.isArray(o) ? o : (o as any)?.orders ?? [];
-
-        // Enrich orders with item names from order details (sample of 20)
-        const sample = rawOrders.slice(0, 20);
-        const details = await Promise.all(
-          sample.map(order =>
-            fetch(`${API}/api/admin/orders/${order._id}`, { headers: h })
-              .then(r => r.ok ? r.json() : null)
-              .catch(() => null)
-          )
-        );
-
-        const enriched: AnyOrder[] = rawOrders.map(order => {
-          const detail = details.find(d =>
-            (d?.order?._id ?? d?._id) === order._id
-          );
-          if (!detail) return order;
-          const detalles: any[] = detail.detalles ?? detail.items ?? detail.productos ?? [];
-          return {
-            ...order,
-            items: detalles.map((it: any) => ({
-              nombre:   it.nombre_sku_solicitado ?? it.nombre ?? it.sku ?? 'Producto',
-              cantidad: it.cantidad ?? it.cantidad_solicitada ?? 1,
-            })),
-          };
-        });
-
-        setOrders(enriched);
+        setStats(st);
+        setOrders(Array.isArray(o) ? o : (o?.orders ?? []));
+        setUsers(Array.isArray(u) ? u : (u?.users ?? []));
+        setProductSales(Array.isArray(ps) ? ps : []);
       } catch (_) {
-        // silently ignore fetch errors
+        // silently ignore
       } finally {
         setLoading(false);
       }
     })();
   }, []);
 
-  /* ── Derived data ─────────────────────────────────────────────────────── */
+  /* ── Derived data ────────────────────────────────────────────────────────── */
 
-  // 1. Porcentaje de venta por producto (pie)
-  const productSales = (() => {
-    const counts: Record<string, number> = {};
-    orders.forEach(o => {
-      (o.items ?? []).forEach(item => {
-        const name = item.nombre ?? 'Sin nombre';
-        counts[name] = (counts[name] ?? 0) + (item.cantidad ?? 1);
-      });
-    });
-    const entries = Object.entries(counts)
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 8);
-    const total = entries.reduce((s, e) => s + e.value, 0);
-    return entries.map((e, idx) => ({
-      ...e,
-      pct:  total > 0 ? +((e.value / total) * 100).toFixed(1) : 0,
-      fill: COLORS[idx % COLORS.length],
-    }));
-  })();
+  // Status bar — from stats.por_status (full DB aggregation, no pagination gaps)
+  const statusData = stats
+    ? Object.entries(stats.por_status)
+        .filter(([, v]) => v > 0)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, value]) => ({ name, value }))
+    : [];
 
-  // 2. Eficiencia de ruta (bar por estado)
-  const statusData = (() => {
-    const counts: Record<string, number> = {};
-    orders.forEach(o => { counts[o.status_final] = (counts[o.status_final] ?? 0) + 1; });
-    return Object.entries(counts).map(([name, value]) => ({ name, value }));
-  })();
-  const totalOrders = orders.length;
-  const delivered   = orders.filter(o => o.status_final?.toLowerCase() === 'entregado').length;
-  const efficiency  = totalOrders > 0 ? Math.round((delivered / totalOrders) * 100) : 0;
+  // Pie — product-sales endpoint
+  const pieData = productSales.slice(0, 8).map((p, idx) => ({
+    name:  p.productName ?? p.sku,
+    value: p.quantity ?? p.percentage ?? 0,
+    fill:  COLORS[idx % COLORS.length],
+  }));
 
-  // 3. Tiempo de entrega — pedidos por día (últimos 14 días)
+  // Pedidos por día (last 14 days) — from orders list
   const deliveryByDay = (() => {
     const map: Record<string, number> = {};
     orders.forEach(o => {
-      const raw = o.fecha_pedido ?? o.createdAt;
+      const raw = o.fecha_pedido ?? o.created_at;
       if (!raw) return;
       const day = new Date(raw).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' });
       map[day] = (map[day] ?? 0) + 1;
     });
-    return Object.entries(map)
-      .map(([fecha, pedidos]) => ({ fecha, pedidos }))
-      .slice(-14);
+    return Object.entries(map).map(([fecha, pedidos]) => ({ fecha, pedidos })).slice(-14);
   })();
 
-  // 4. Top clientes por gasto
+  // Top clientes — from orders + users
   const topClientes = (() => {
     const spend: Record<string, number> = {};
     const count: Record<string, number> = {};
     orders.forEach(o => {
       if (!o.customer_id) return;
-      spend[o.customer_id] = (spend[o.customer_id] ?? 0) + (o.total ?? o.subtotal ?? 0);
+      spend[o.customer_id] = (spend[o.customer_id] ?? 0) + (o.total ?? o.subtotal ?? o.valor_pedido ?? 0);
       count[o.customer_id] = (count[o.customer_id] ?? 0) + 1;
     });
     return Object.entries(spend)
       .map(([id, total]) => {
         const u = users.find(u => u._id === id || u.customer_id === id);
-        return {
-          nombre: u?.nombre_negocio ?? u?.nombre ?? u?.email ?? id,
-          total,
-          pedidos: count[id] ?? 0,
-        };
+        return { nombre: u?.nombre_negocio ?? u?.nombre ?? u?.email ?? id, total, pedidos: count[id] ?? 0 };
       })
       .sort((a, b) => b.total - a.total)
       .slice(0, 5);
   })();
+
+  const diffHoy = stats ? stats.hoy - stats.ayer : 0;
 
   if (loading) {
     return (
@@ -181,105 +175,89 @@ export default function AdminAnaliticasPage() {
         <p className="text-sm text-gray-400 mt-0.5">Dashboard operativo en tiempo real</p>
       </div>
 
-      {/* KPI rápido */}
-      <div className="grid grid-cols-2 gap-4">
-        <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm text-center">
-          <p className="text-3xl font-bold text-gray-900">{efficiency}%</p>
-          <p className="text-xs text-gray-400 mt-1">Eficiencia de entrega</p>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm text-center">
-          <p className="text-3xl font-bold text-gray-900">{delivered}</p>
-          <p className="text-xs text-gray-400 mt-1">Pedidos entregados</p>
-        </div>
+      {/* KPI strip — from /api/admin/stats */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <KPICard label="Total pedidos"     value={stats?.total ?? 0} />
+        <KPICard label="Pedidos hoy"       value={stats?.hoy ?? 0}
+          sub={diffHoy >= 0 ? `↗ +${diffHoy} vs ayer` : `↘ ${diffHoy} vs ayer`} />
+        <KPICard label="Nivel de servicio" value={`${stats?.nivel_servicio ?? 0}%`} accent />
+        <KPICard label="Revenue entregado"
+          value={`$${(stats?.revenue_total ?? 0).toLocaleString('es-MX', { maximumFractionDigits: 0 })}`} />
       </div>
 
-      {/* Row 1: Ventas por producto + Eficiencia de ruta */}
+      {/* Sub-KPIs */}
+      <div className="grid grid-cols-4 gap-3">
+        {[
+          { label: 'Activos',     value: stats?.activos    ?? 0, color: 'text-blue-600',   bg: 'bg-blue-50'   },
+          { label: 'Pendientes',  value: stats?.pendientes ?? 0, color: 'text-amber-600',  bg: 'bg-amber-50'  },
+          { label: 'Entregados',  value: stats?.entregados ?? 0, color: 'text-green-600',  bg: 'bg-green-50'  },
+          { label: 'Cancelados',  value: stats?.cancelados ?? 0, color: 'text-red-600',    bg: 'bg-red-50'    },
+        ].map(k => (
+          <div key={k.label} className={`${k.bg} rounded-xl border border-transparent p-4 text-center`}>
+            <p className={`text-2xl font-bold ${k.color}`}>{k.value}</p>
+            <p className="text-xs text-gray-500 mt-0.5">{k.label}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Row: Pie + Status bar */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
         {/* Porcentaje de venta por producto */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-          {sectionTitle('Porcentaje de venta por producto', 'Distribución de unidades vendidas por SKU')}
-          {productSales.length === 0 ? (
+          {sectionTitle('Venta por producto', 'Distribución de unidades vendidas por SKU')}
+          {pieData.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-10">Sin datos de productos</p>
           ) : (
-            <ResponsiveContainer width="100%" height={380}>
-              <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
-                <Pie
-                  data={productSales}
-                  cx="50%"
-                  cy="42%"
-                  innerRadius={65}
-                  outerRadius={110}
-                  paddingAngle={3}
-                  dataKey="value"
-                />
+            <ResponsiveContainer width="100%" height={340}>
+              <PieChart>
+                <Pie data={pieData} cx="50%" cy="42%" innerRadius={60} outerRadius={100} paddingAngle={3} dataKey="value" />
                 <Tooltip
                   formatter={(value: any, name: any) => {
-                    const total = productSales.reduce((s, p) => s + p.value, 0);
-                    const pct = total > 0 ? ((value / total) * 100).toFixed(1) : '0';
-                    return [`${pct}%`, name];
+                    const total = pieData.reduce((s, p) => s + p.value, 0);
+                    return [`${total > 0 ? ((value / total) * 100).toFixed(1) : 0}%`, name];
                   }}
                   contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }}
                 />
-                <Legend
-                  layout="horizontal"
-                  verticalAlign="bottom"
-                  align="center"
+                <Legend layout="horizontal" verticalAlign="bottom" align="center"
                   wrapperStyle={{ paddingTop: 16, fontSize: 11 }}
-                  formatter={(value) => <span style={{ fontSize: 11, color: '#6b7280' }}>{value}</span>}
+                  formatter={v => <span style={{ fontSize: 11, color: '#6b7280' }}>{v}</span>}
                 />
               </PieChart>
             </ResponsiveContainer>
           )}
         </div>
 
-        {/* Eficiencia de ruta */}
+        {/* Distribución por estado — from stats.por_status */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-          {sectionTitle('Eficiencia de ruta', 'Estado actual de todos los pedidos')}
+          {sectionTitle('Pedidos por estado', 'Conteo total por estado (datos en tiempo real)')}
           {statusData.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-10">Sin datos</p>
           ) : (
             <>
-              {/* Gauge visual */}
-              <div className="flex items-center justify-center mb-5">
-                <div className="relative w-32 h-32">
+              <div className="flex items-center justify-center mb-4">
+                <div className="relative w-28 h-28">
                   <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
                     <circle cx="50" cy="50" r="40" fill="none" stroke="#f3f4f6" strokeWidth="12" />
-                    <circle
-                      cx="50" cy="50" r="40"
-                      fill="none"
-                      stroke="#E61A27"
-                      strokeWidth="12"
-                      strokeDasharray={`${efficiency * 2.51} 251`}
-                      strokeLinecap="round"
-                    />
+                    <circle cx="50" cy="50" r="40" fill="none" stroke="#E61A27" strokeWidth="12"
+                      strokeDasharray={`${(stats?.nivel_servicio ?? 0) * 2.51} 251`} strokeLinecap="round" />
                   </svg>
                   <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className="text-2xl font-bold text-gray-900">{efficiency}%</span>
+                    <span className="text-xl font-bold text-gray-900">{stats?.nivel_servicio ?? 0}%</span>
                     <span className="text-[10px] text-gray-400">entregados</span>
                   </div>
                 </div>
               </div>
-              <ResponsiveContainer width="100%" height={160}>
-                <BarChart data={statusData} layout="vertical" margin={{ left: 10 }}>
+              <ResponsiveContainer width="100%" height={Math.max(130, statusData.length * 28)}>
+                <BarChart data={statusData} layout="vertical" margin={{ left: 10, right: 10 }}>
                   <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f3f4f6" />
                   <XAxis type="number" tick={{ fontSize: 11 }} />
                   <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={90} />
-                  <Tooltip
-                    contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }}
-                  />
-                  <Bar
-                    dataKey="value"
-                    name="Pedidos"
-                    radius={[0, 4, 4, 0]}
+                  <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }} />
+                  <Bar dataKey="value" name="Pedidos" radius={[0, 4, 4, 0]}
                     shape={(props: any) => {
-                      const { x, y, width, height, name } = props;
-                      const fill =
-                        ['entregado','Entregado'].includes(name)              ? '#10B981' :
-                        ['en camino','En camino','en_camino'].includes(name)  ? '#F97316' :
-                        ['pendiente','Pendiente'].includes(name)              ? '#F59E0B' :
-                        ['cancelado','Cancelado'].includes(name)              ? '#EF4444' :
-                                                                                '#FBBFCA';
+                      const { x, y, width, height, index } = props;
+                      const fill = STATUS_COLOR[statusData[index]?.name] ?? '#FBBFCA';
                       return <rect x={x} y={y} width={width} height={height} rx={4} ry={4} fill={fill} />;
                     }}
                   />
@@ -290,9 +268,9 @@ export default function AdminAnaliticasPage() {
         </div>
       </div>
 
-      {/* Row 2: Tiempo de entrega */}
+      {/* Pedidos por día */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-        {sectionTitle('Tiempo de entrega', 'Volumen de pedidos registrados por día (últimos 14 días)')}
+        {sectionTitle('Pedidos por día', 'Volumen registrado en los últimos 14 días')}
         {deliveryByDay.length === 0 ? (
           <p className="text-sm text-gray-400 text-center py-10">Sin datos de fechas</p>
         ) : (
@@ -301,24 +279,16 @@ export default function AdminAnaliticasPage() {
               <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
               <XAxis dataKey="fecha" tick={{ fontSize: 11 }} />
               <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-              <Tooltip
-                contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }}
-                formatter={(v: any) => [`${v} pedidos`, 'Pedidos']}
-              />
-              <Line
-                type="monotone"
-                dataKey="pedidos"
-                stroke="#E61A27"
-                strokeWidth={2.5}
-                dot={{ fill: '#E61A27', r: 4 }}
-                activeDot={{ r: 6 }}
-              />
+              <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }}
+                formatter={(v: any) => [`${v} pedidos`, 'Pedidos']} />
+              <Line type="monotone" dataKey="pedidos" stroke="#E61A27" strokeWidth={2.5}
+                dot={{ fill: '#E61A27', r: 4 }} activeDot={{ r: 6 }} />
             </LineChart>
           </ResponsiveContainer>
         )}
       </div>
 
-      {/* Row 3: Top clientes por gasto */}
+      {/* Top clientes */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
         {sectionTitle('Top clientes por gasto', 'Clientes con mayor volumen de compra acumulado')}
         {topClientes.length === 0 ? (
@@ -343,10 +313,8 @@ export default function AdminAnaliticasPage() {
                       </div>
                     </div>
                     <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                      <div
-                        className="h-full rounded-full bg-[#E61A27] transition-all duration-500"
-                        style={{ width: `${pct}%` }}
-                      />
+                      <div className="h-full rounded-full bg-[#E61A27] transition-all duration-500"
+                        style={{ width: `${pct}%` }} />
                     </div>
                   </div>
                 </div>

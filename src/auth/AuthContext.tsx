@@ -24,7 +24,7 @@ const USER_KEY  = 'or_user';
 
 export const ROLE_PATHS: Record<UserRole, string> = {
   usuario:    '/usuario',
-  admin:      '/admin',
+  admin:      '/admin/analiticas',
   repartidor: '/repartidor',
 };
 

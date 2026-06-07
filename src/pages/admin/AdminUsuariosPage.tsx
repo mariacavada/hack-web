@@ -3,6 +3,17 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 const API = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
 
+interface Stats {
+  total:          number;
+  hoy:            number;
+  activos:        number;
+  entregados:     number;
+  cancelados:     number;
+  nivel_servicio: number;
+  revenue_total:  number;
+  por_status:     Record<string, number>;
+}
+
 interface User {
   _id: string;
   nombre_negocio?: string;
@@ -168,7 +179,7 @@ function UserTable({
               <span>Usuario</span>
               <span className="text-center">{mode === 'repartidor' ? '# Entregados' : '# Pedidos'}</span>
               <span />
-              <span>{mode === 'repartidor' ? 'Último pedido' : 'Pref. sustitución'}</span>
+              <span>{mode === 'repartidor' ? 'Último pedido' : ''}</span>
               <span />
             </div>
             <div className={`divide-y divide-gray-100 ${scrollable ? 'overflow-y-auto max-h-63' : ''}`}>
@@ -195,7 +206,7 @@ function UserTable({
                     </div>
                     <p className="text-xs font-bold text-gray-900 text-center">{count}</p>
                     <span />
-                    <p className="text-xs text-gray-400 truncate pr-2">{mode === 'repartidor' ? ultimoLabel : '—'}</p>
+                    <p className="text-xs text-gray-400 truncate pr-2">{mode === 'repartidor' ? ultimoLabel : ''}</p>
                     <button
                       onClick={() => onSelect(u)}
                       className="text-[11px] font-semibold text-gray-800 bg-gray-100 hover:bg-gray-200 px-2.5 py-1 rounded-lg transition-colors"
@@ -218,6 +229,7 @@ export default function AdminUsuariosPage() {
   const [clientes,      setClientes]      = useState<User[]>([]);
   const [repartidores,  setRepartidores]  = useState<User[]>([]);
   const [orders,        setOrders]        = useState<Order[]>([]);
+  const [stats,         setStats]         = useState<Stats | null>(null);
   const [loading,       setLoading]       = useState(true);
   const [search,        setSearch]        = useState('');
   const [selected,      setSelected]      = useState<User | null>(null);
@@ -229,16 +241,18 @@ export default function AdminUsuariosPage() {
 
   useEffect(() => {
     Promise.all([
-      fetch(`${API}/api/admin/users`,  { headers: h }).then(r => r.ok ? r.json() : []),
-      fetch(`${API}/api/admin/orders`, { headers: h }).then(r => r.ok ? r.json() : []),
+      fetch(`${API}/api/admin/users?limit=500`,   { headers: h }).then(r => r.ok ? r.json() : []),
+      fetch(`${API}/api/admin/orders?limit=500`,  { headers: h }).then(r => r.ok ? r.json() : []),
+      fetch(`${API}/api/admin/stats`,             { headers: h }).then(r => r.ok ? r.json() : null),
     ])
-      .then(([u, ord]) => {
+      .then(([u, ord, st]) => {
         const raw: User[] = Array.isArray(u) ? u : u?.users ?? [];
         const seen = new Set<string>();
         const all = raw.filter(x => { if (seen.has(x._id)) return false; seen.add(x._id); return true; });
         setClientes(all.filter(x => x.role === 'customer' || x.rol === 'usuario' || x.rol === 'cliente'));
         setRepartidores(all.filter(x => x.role === 'driver' || x.role === 'repartidor' || x.rol === 'repartidor'));
         setOrders(Array.isArray(ord) ? ord : ord?.orders ?? []);
+        setStats(st ?? null);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -317,6 +331,23 @@ export default function AdminUsuariosPage() {
             className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-xl bg-white focus:outline-none focus:ring-1 focus:ring-[#E61A27]"
           />
         </div>
+      </div>
+
+      {/* Stats strip — same data source as Analítica (/api/admin/stats) */}
+      <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+        {[
+          { label: 'Clientes',         value: clientes.length,              color: 'text-gray-900' },
+          { label: 'Repartidores',     value: repartidores.length,          color: 'text-gray-900' },
+          { label: 'Total pedidos',    value: stats?.total ?? '—',          color: 'text-gray-900' },
+          { label: 'Pedidos activos',  value: stats?.activos ?? '—',        color: 'text-blue-600' },
+          { label: 'Entregados',       value: stats?.entregados ?? '—',     color: 'text-green-600' },
+          { label: 'Nivel servicio',   value: stats ? `${stats.nivel_servicio}%` : '—', color: 'text-[#E61A27]' },
+        ].map(k => (
+          <div key={k.label} className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm text-center">
+            <p className={`text-2xl font-bold ${k.color}`}>{k.value}</p>
+            <p className="text-[11px] text-gray-400 mt-0.5 leading-tight">{k.label}</p>
+          </div>
+        ))}
       </div>
 
       <UserTable title="Clientes"     users={clientes}     orders={orders} search={search} onSelect={setSelected} scrollable />
