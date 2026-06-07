@@ -49,7 +49,7 @@ const INCIDENT_TYPES = [
 
 export default function RepartidorPage() {
   const location = useLocation();
-  const { orders, loading, updateStatus: ctxUpdateStatus } = useRepartidor();
+  const { orders, loading, updateStatus: ctxUpdateStatus, refreshSilent } = useRepartidor();
 
   const [route,          setRoute]          = useState<Route | null>(null);
   const [cedisLocation,  setCedisLocation]  = useState<CedisInfo | null>(null);
@@ -66,8 +66,15 @@ export default function RepartidorPage() {
   const [incidentOrder, setIncidentOrder] = useState('');
   const [incidentType,  setIncidentType]  = useState('producto_faltante');
   const [incidentDesc,  setIncidentDesc]  = useState('');
+  const [incidentItems, setIncidentItems] = useState<string[]>([]);
+  const [itemsError,    setItemsError]    = useState<string | null>(null);
   const [submitting,    setSubmitting]    = useState(false);
   const [incidentDone,  setIncidentDone]  = useState(false);
+
+  const incidentOrderObj = useMemo(
+    () => orders.find(o => o._id === incidentOrder) ?? null,
+    [orders, incidentOrder],
+  );
 
   const [routeActionLoading, setRouteActionLoading] = useState(false);
   const [completingStop,     setCompletingStop]     = useState<number | null>(null);
@@ -223,13 +230,7 @@ export default function RepartidorPage() {
     order: AssignedOrder,
     status: 'recibido' | 'preparando' | 'en_camino' | 'entregado' | 'incompleto',
   ) => {
-    const apiId      = order.id_pedido ?? order._id;
-    const newStatus  = normalizeStatus(status);
-
-    // Optimistic update — applies immediately so both pages reflect the change.
-    // We only revert on 404 (not found) or network failure. 500s are caused by
-    // a backend notification bug; the DB update still succeeds in that case.
-    ctxUpdateStatus(order._id, newStatus);
+    const apiId = order._id;
     setUpdatingId(order._id);
     setStatusError(null);
 
@@ -242,24 +243,28 @@ export default function RepartidorPage() {
       });
       const data = await res.json().catch(() => ({}));
 
-      if (res.status === 404) {
-        ctxUpdateStatus(order._id, order.status_final); // revert — order not found
-        setStatusError(data?.message ?? 'Pedido no encontrado o no asignado a ti');
-      } else if (res.ok) {
-        // Use server-confirmed status if it differs
-        const confirmed = normalizeStatus(data?.order?.status_final ?? data?.status ?? status);
-        if (confirmed !== newStatus) ctxUpdateStatus(order._id, confirmed);
+      if (res.ok || res.status >= 500) {
+        // 5xx = backend notification bug; DB write still succeeded — treat as success.
+        // Prefer data.status (explicit new status) over data.order.status_final (may be stale).
+        const confirmed = res.ok
+          ? normalizeStatus(data?.status ?? data?.order?.status_final ?? status)
+          : normalizeStatus(status);
+
+        ctxUpdateStatus(order._id, confirmed);
+
         if (confirmed === 'Entregado') {
           const allDone = orders
-            .map(o => o._id === order._id ? { ...o, status_final: confirmed } : o)
             .filter(isToday)
-            .every(o => o.status_final === 'Entregado');
+            .every(o => o._id === order._id ? true : o.status_final === 'Entregado');
           if (allDone) setRoute(r => r ? { ...r, current_status: 'entregado' } : r);
         }
+
+        // Background sync: confirm the DB reflects what we just set
+        refreshSilent();
+      } else {
+        setStatusError(data?.message ?? data?.error ?? `No se pudo actualizar el estado (${res.status})`);
       }
-      // 5xx → optimistic update stays (backend bug, DB was updated)
     } catch {
-      ctxUpdateStatus(order._id, order.status_final); // revert on network error
       setStatusError('No se pudo conectar con el servidor.');
     } finally {
       setUpdatingId(null);
@@ -287,24 +292,45 @@ export default function RepartidorPage() {
 
   const handleCompleteStop = async (stopIndex: number) => {
     if (!route?._id) return;
-    const stop    = route.stops?.[stopIndex];
-    const stopNum = stop?.stop_number ?? stopIndex + 1;
+    const routeStop = route.stops?.[stopIndex];
+    const stopNum   = routeStop?.stop_number ?? stopIndex + 1;
     setCompletingStop(stopIndex);
     try {
       const coords = await getCurrentCoords();
       const body: Record<string, unknown> = {};
       if (coords) body.coords = coords;
+
+      // 1. Complete the route stop
       const res = await fetch(`${API}/api/driver/route/${route._id}/stop/${stopNum}/complete`, {
         method: 'PATCH', headers: h, body: JSON.stringify(body),
       });
-      if (res.ok) {
+      if (res.ok || res.status >= 500) {
         const data = await res.json().catch(() => ({}));
-        setRoute(prev => {
-          if (!prev?.stops) return prev;
-          const stops   = prev.stops.map((s, i) => i === stopIndex ? { ...s, status: 'completada' } : s);
-          const allDone = data?.todasCompletas ?? stops.every(s => s.status === 'completada');
-          return { ...prev, stops, ...(allDone ? { current_status: 'entregado' } : {}) };
-        });
+        if (res.ok) {
+          setRoute(prev => {
+            if (!prev?.stops) return prev;
+            const stops   = prev.stops.map((s, i) => i === stopIndex ? { ...s, status: 'completada' } : s);
+            const allDone = data?.todasCompletas ?? stops.every(s => s.status === 'completada');
+            return { ...prev, stops, ...(allDone ? { current_status: 'entregado' } : {}) };
+          });
+        }
+
+        // 2. Update the order status to 'entregado' using the stop's order_id
+        const stop = effectiveStops[stopIndex];
+        const matchingOrder = stop
+          ? orders.find(o => o._id === stop.order_id || o.id_pedido === stop.id_pedido)
+          : null;
+        if (matchingOrder) {
+          const statusBody: Record<string, unknown> = { status: 'entregado' };
+          if (coords) statusBody.coords = coords;
+          const statusRes = await fetch(`${API}/api/driver/orders/${matchingOrder._id}/status`, {
+            method: 'PATCH', headers: h, body: JSON.stringify(statusBody),
+          });
+          if (statusRes.ok || statusRes.status >= 500) {
+            ctxUpdateStatus(matchingOrder._id, 'Entregado');
+            refreshSilent();
+          }
+        }
       }
     } finally { setCompletingStop(null); }
   };
@@ -339,16 +365,39 @@ export default function RepartidorPage() {
 
   const submitIncident = async () => {
     if (!incidentOrder || !incidentDesc.trim()) return;
+    if (incidentType === 'producto_faltante' && incidentItems.length === 0) {
+      setItemsError('Selecciona al menos un producto faltante.');
+      return;
+    }
     setSubmitting(true);
     try {
       const coords = await getCurrentCoords();
-      const body: Record<string, unknown> = { tipo: incidentType, descripcion: incidentDesc };
+      const body: Record<string, unknown> = {
+        tipo:            incidentType,
+        descripcion:     incidentDesc,
+        items_afectados: incidentType === 'producto_faltante'
+          ? incidentItems.map(sku => ({ sku }))
+          : [],
+      };
       if (coords) body.coords = coords;
       await fetch(`${API}/api/driver/orders/${incidentOrder}/incident`, {
         method: 'POST', headers: h, body: JSON.stringify(body),
       });
+
+      if (incidentType === 'producto_faltante') {
+        const statusRes = await fetch(`${API}/api/driver/orders/${incidentOrder}/status`, {
+          method: 'PATCH', headers: h, body: JSON.stringify({ status: 'incompleto' }),
+        });
+        if (statusRes.ok || statusRes.status >= 500) {
+          ctxUpdateStatus(incidentOrder, 'Incompleto');
+          refreshSilent();
+        }
+      }
+
       setIncidentDone(true);
       setIncidentDesc('');
+      setIncidentItems([]);
+      setItemsError(null);
       setTimeout(() => setIncidentDone(false), 3000);
     } finally { setSubmitting(false); }
   };
@@ -643,8 +692,11 @@ export default function RepartidorPage() {
 
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-gray-500 uppercase tracking-wide">Tipo de incidencia</label>
-                <select value={incidentType} onChange={e => setIncidentType(e.target.value)}
-                  className="w-full border border-gray-200 rounded-xl px-3.5 py-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#E61A27]/20 focus:border-[#E61A27]">
+                <select
+                  value={incidentType}
+                  onChange={e => { setIncidentType(e.target.value); setIncidentItems([]); setItemsError(null); }}
+                  className="w-full border border-gray-200 rounded-xl px-3.5 py-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#E61A27]/20 focus:border-[#E61A27]"
+                >
                   {INCIDENT_TYPES.map(t => (
                     <option key={t.key} value={t.key}>{t.label}</option>
                   ))}
@@ -658,6 +710,43 @@ export default function RepartidorPage() {
                   </p>
                 )}
               </div>
+
+              {incidentType === 'producto_faltante' && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wide">Productos afectados</label>
+                  {!incidentOrderObj ? (
+                    <p className="text-xs text-gray-400 py-1">Selecciona un pedido para ver sus productos.</p>
+                  ) : (incidentOrderObj.items ?? []).length === 0 ? (
+                    <p className="text-xs text-gray-400 py-1">Este pedido no tiene productos registrados.</p>
+                  ) : (
+                    <div className="border border-gray-200 rounded-xl overflow-hidden divide-y divide-gray-100">
+                      {(incidentOrderObj.items ?? []).map(item => {
+                        const checked = incidentItems.includes(item.sku);
+                        return (
+                          <label key={item.sku} className="flex items-center gap-3 px-3.5 py-3 cursor-pointer hover:bg-gray-50 transition-colors">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => {
+                                setItemsError(null);
+                                setIncidentItems(prev =>
+                                  checked ? prev.filter(s => s !== item.sku) : [...prev, item.sku]
+                                );
+                              }}
+                              className="w-4 h-4 rounded accent-[#E61A27] shrink-0"
+                            />
+                            <span className="text-sm text-gray-800 flex-1 truncate">{item.nombre}</span>
+                            <span className="text-xs font-mono text-gray-400 shrink-0">×{item.cantidad}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {itemsError && (
+                    <p className="text-xs text-red-600 font-medium">{itemsError}</p>
+                  )}
+                </div>
+              )}
 
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-gray-500 uppercase tracking-wide">Descripción</label>

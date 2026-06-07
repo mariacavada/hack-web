@@ -56,7 +56,8 @@ export function normalizeStatus(s?: string): string {
 
 const todayStr = new Date().toDateString();
 export function isToday(o: AssignedOrder): boolean {
-  const d = o.fecha_pedido ?? o.assigned_at ?? o.fecha_entrega;
+  // Priority: when it was assigned to the driver → scheduled delivery date → order creation date
+  const d = o.assigned_at ?? o.fecha_entrega ?? o.fecha_pedido;
   if (!d) return true;
   return new Date(d).toDateString() === todayStr;
 }
@@ -118,19 +119,25 @@ export function parseDriverOrders(raw: any): AssignedOrder[] {
 
 /* ── Context ─────────────────────────────────────────────────────────────── */
 interface Ctx {
-  orders:       AssignedOrder[];
-  loading:      boolean;
-  updateStatus: (orderId: string, newStatus: string) => void;
-  refresh:      () => void;
+  orders:          AssignedOrder[];
+  loading:         boolean;
+  updateStatus:    (orderId: string, newStatus: string) => void;
+  refresh:         () => void;
+  refreshSilent:   () => void;
 }
 
 const RepartidorCtx = createContext<Ctx>({
-  orders: [], loading: true, updateStatus: () => {}, refresh: () => {},
+  orders: [], loading: true, updateStatus: () => {}, refresh: () => {}, refreshSilent: () => {},
 });
 
 export function RepartidorProvider({ children }: { children: ReactNode }) {
   const [orders,  setOrders]  = useState<AssignedOrder[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const applyData = (data: any) => {
+    const raw = Array.isArray(data) ? data : (data?.orders ?? []);
+    setOrders(parseDriverOrders(raw));
+  };
 
   const fetchOrders = () => {
     const token = localStorage.getItem('or_token');
@@ -138,12 +145,19 @@ export function RepartidorProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     fetch(`${API}/api/driver/orders`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : [])
-      .then(data => {
-        const raw = Array.isArray(data) ? data : (data?.orders ?? []);
-        setOrders(parseDriverOrders(raw));
-      })
+      .then(applyData)
       .catch(() => {})
       .finally(() => setLoading(false));
+  };
+
+  // Re-fetch without triggering the loading spinner (used after status updates)
+  const fetchOrdersSilent = () => {
+    const token = localStorage.getItem('or_token');
+    if (!token) return;
+    fetch(`${API}/api/driver/orders`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data) applyData(data); })
+      .catch(() => {});
   };
 
   useEffect(fetchOrders, []);
@@ -155,7 +169,7 @@ export function RepartidorProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <RepartidorCtx.Provider value={{ orders, loading, updateStatus, refresh: fetchOrders }}>
+    <RepartidorCtx.Provider value={{ orders, loading, updateStatus, refresh: fetchOrders, refreshSilent: fetchOrdersSilent }}>
       {children}
     </RepartidorCtx.Provider>
   );
