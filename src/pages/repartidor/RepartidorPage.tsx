@@ -21,6 +21,69 @@ interface AssignedOrder {
   direccion_entrega?: string;
   items?: OrderItem[];
   total?: number;
+  eta_entrega?: string;
+  status_actual?: string;
+}
+
+/** Shape returned by GET /api/driver/orders */
+interface DriverOrderResponse {
+  order?: Record<string, any>;
+  detalles?: Record<string, any>[];
+  tracking?: { status_actual?: string; eta_entrega?: string };
+}
+
+const STATUS_NORMALIZE: Record<string, string> = {
+  pendiente:        'Pendiente',
+  confirmado:       'Confirmado',
+  en_preparacion:   'En preparación',
+  'en preparación': 'En preparación',
+  en_camino:        'En camino',
+  'en camino':      'En camino',
+  entregado:        'Entregado',
+  cancelado:        'Cancelado',
+};
+
+function normalizeStatus(s?: string): string {
+  if (!s) return 'Pendiente';
+  return STATUS_NORMALIZE[s.toLowerCase()] ?? STATUS_NORMALIZE[s.toLowerCase().replace(/\s+/g, '_')] ?? s;
+}
+
+function parseDriverOrders(raw: any): AssignedOrder[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item: DriverOrderResponse | AssignedOrder) => {
+    // Nested shape: { order, detalles[], tracking }
+    if ('order' in item && item.order) {
+      const o   = item.order as Record<string, any>;
+      const det = (item.detalles ?? []) as Record<string, any>[];
+      const trk = item.tracking ?? {};
+      return {
+        _id:               o._id ?? o.id_pedido,
+        id_pedido:         o.id_pedido,
+        status_final:      normalizeStatus(o.status_final ?? trk.status_actual),
+        usuario:           o.usuario ?? o.customer ?? null,
+        direccion_entrega: o.direccion_entrega ?? o.direccion ?? o.usuario?.direccion ?? null,
+        total:             o.total ?? o.subtotal,
+        eta_entrega:       trk.eta_entrega ?? undefined,
+        status_actual:     trk.status_actual ?? undefined,
+        items: det.map(d => ({
+          sku:      d.sku_solicitado ?? d.sku ?? '',
+          nombre:   d.nombre_sku_solicitado ?? d.nombre ?? d.sku_solicitado ?? 'Producto',
+          cantidad: d.quantity ?? d.cantidad ?? 1,
+        })),
+      } satisfies AssignedOrder;
+    }
+    // Flat shape (already an order object)
+    const o = item as any;
+    return {
+      _id:               o._id ?? o.id_pedido,
+      id_pedido:         o.id_pedido,
+      status_final:      normalizeStatus(o.status_final),
+      usuario:           o.usuario ?? null,
+      direccion_entrega: o.direccion_entrega ?? o.direccion ?? null,
+      total:             o.total ?? o.subtotal,
+      items:             o.items ?? o.detalles ?? [],
+    } satisfies AssignedOrder;
+  });
 }
 
 
@@ -115,7 +178,7 @@ export default function RepartidorPage() {
       fetch(`${API}/api/map/overview`,       { headers: h }).then(r => r.ok ? r.json() : null),
     ])
       .then(([o, r, p, mapData]) => {
-        const fetchedOrders: AssignedOrder[] = Array.isArray(o) ? o : o?.orders ?? [];
+        const fetchedOrders: AssignedOrder[] = parseDriverOrders(Array.isArray(o) ? o : o?.orders ?? []);
         const fetchedRoute: Route | null     = r && typeof r === 'object' ? r : null;
 
         setOrders(fetchedOrders);
@@ -144,17 +207,19 @@ export default function RepartidorPage() {
   }, []);
 
   // ── Order-level status update ──────────────────────────────────────────────
-  const updateOrderStatus = async (orderId: string, status: 'en_camino' | 'entregado') => {
-    setUpdatingId(orderId);
+  // The API uses id_pedido (string), not mongo _id
+  const updateOrderStatus = async (order: AssignedOrder, status: 'en_camino' | 'entregado') => {
+    const apiId = order.id_pedido ?? order._id;
+    setUpdatingId(order._id);
     try {
-      const res = await fetch(`${API}/api/driver/orders/${orderId}/status`, {
+      const res = await fetch(`${API}/api/driver/orders/${apiId}/status`, {
         method: 'PATCH',
         headers: h,
         body: JSON.stringify({ status }),
       });
       if (res.ok) {
         const label = status === 'en_camino' ? 'En camino' : 'Entregado';
-        setOrders(prev => prev.map(o => o._id === orderId ? { ...o, status_final: label } : o));
+        setOrders(prev => prev.map(o => o._id === order._id ? { ...o, status_final: label } : o));
       }
     } finally {
       setUpdatingId(null);
@@ -310,11 +375,22 @@ export default function RepartidorPage() {
                 </div>
 
                 {address && (
-                  <div className="px-4 pb-3 flex items-start gap-2">
+                  <div className="px-4 pb-2 flex items-start gap-2">
                     <svg className="w-4 h-4 text-gray-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0zM15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                     </svg>
                     <p className="text-sm font-semibold text-gray-900 leading-snug">{address}</p>
+                  </div>
+                )}
+
+                {o.eta_entrega && (
+                  <div className="px-4 pb-2 flex items-center gap-2">
+                    <svg className="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <p className="text-xs text-gray-500">
+                      ETA: <span className="font-semibold text-gray-700">{o.eta_entrega}</span>
+                    </p>
                   </div>
                 )}
 
@@ -344,7 +420,7 @@ export default function RepartidorPage() {
                 <div className="px-4 pb-4 flex flex-col gap-2">
                   {o.status_final === 'Confirmado' && (
                     <button
-                      onClick={() => updateOrderStatus(o._id, 'en_camino')}
+                      onClick={() => updateOrderStatus(o, 'en_camino')}
                       disabled={isUpdating}
                       className="w-full h-14 rounded-xl bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white font-bold text-base transition-colors flex items-center justify-center gap-2 shadow-sm"
                     >
@@ -362,7 +438,7 @@ export default function RepartidorPage() {
                   )}
                   {o.status_final === 'En camino' && (
                     <button
-                      onClick={() => updateOrderStatus(o._id, 'entregado')}
+                      onClick={() => updateOrderStatus(o, 'entregado')}
                       disabled={isUpdating}
                       className="w-full h-14 rounded-xl bg-green-600 hover:bg-green-700 disabled:opacity-60 text-white font-bold text-base transition-colors flex items-center justify-center gap-2 shadow-sm"
                     >
@@ -379,7 +455,7 @@ export default function RepartidorPage() {
                     </button>
                   )}
                   <button
-                    onClick={() => { setActiveTab('incidencias'); setIncidentOrder(o._id); }}
+                    onClick={() => { setActiveTab('incidencias'); setIncidentOrder(o.id_pedido ?? o._id); }}
                     className="w-full h-11 rounded-xl border border-gray-200 text-sm font-medium text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition-colors"
                   >
                     Reportar incidencia
@@ -548,7 +624,7 @@ export default function RepartidorPage() {
                 >
                   <option value="">Selecciona un pedido</option>
                   {orders.map(o => (
-                    <option key={o._id} value={o._id}>{o.id_pedido ?? o._id}</option>
+                    <option key={o._id} value={o.id_pedido ?? o._id}>{o.id_pedido ?? o._id}</option>
                   ))}
                 </select>
               </div>
